@@ -1,0 +1,402 @@
+augment.linnet = function(L, delta, h){
+  # this function augments an object of class "linnet" by several attributes
+  # depending on delta and h
+  
+  # count of lines
+  M = L$lines$n
+  
+  # count of vertices
+  W = L$vertices$n
+  
+  # adjacency matrix of vertices
+  A = L$m*1
+  
+  # ends of line segments (x0 y0 x1 y1)
+  ends = as.matrix(L$lines$ends)
+  
+  # length of line segments
+  d = diag(L$dpath[L$from, L$to])
+  # total length of the network
+  d.L = sum(d)
+  
+  # ensure that J.m > 0
+  delta = min(delta, min(L$dpath[which(L$dpath > 0)])/2)
+  # line specific knot distances
+  delta.m = d/floor(d/delta)*(d/delta - floor(d/delta) < 0.5) + d/ceiling(d/delta)*(d/delta - floor(d/delta) >= 0.5)
+  
+  # ensure that h <= delta
+  h = min(h, delta)
+  # line specific bin widths
+  h.m = d/floor(d/h)*(d/h - floor(d/h) < 0.5) + d/ceiling(d/h)*(d/h - floor(d/h) >= 0.5)
+  
+  
+  # initializing...
+  tau = b = z = vector("list", M) 
+  V.left = V.right = con.left = con.right = vector("list", M)
+  N.m = J.m = 0
+
+  # do for every line segment
+  for (m in 1:M) {
+ 
+    # knot sequences tau
+    tau[[m]] = seq(0, d[m], delta.m[m])
+    
+    # bin boundaries b
+    b[[m]] = seq(0, d[m], h.m[m])
+    
+    # characterization of bins by midpoints z
+    z[[m]] = (b[[m]][1:(length(b[[m]])-1)] + b[[m]][2:length(b[[m]])])/2
+    
+    # total count of bins in the geometric network
+    N.m[m] = length(z[[m]])
+    
+    # count of linear B-splines on line segment
+    J.m[m] = length(tau[[m]]) - 2
+  }
+  
+  # degrees of vertices network
+  V.deg = degree(graph_from_adjacency_matrix(A, mode = "undirected"))
+  
+  # incident lines to vertices
+  i = 0
+  for (v in 1:W) {
+    i = i+1
+    vv = which(A[v, ] == 1)
+    q = 0
+    for (j in vv) {
+      q = q+1
+      V.left[[i]] = c(V.left[[i]], which(L$to == vv[q] & L$from == v))
+      V.right[[i]] = c(V.right[[i]], which(L$from == vv[q] & L$to == v))
+    }
+    V.left[[i]] = sort(unique(V.left[[i]]))
+    V.right[[i]] = sort(unique(V.right[[i]]))
+  }
+  
+
+  
+  # add to linnet object
+  L$M = M
+  L$W = W
+  L$d = d
+  L$d.L = d.L
+  L$delta = delta.m
+  L$h = h.m
+  L$tau = tau
+  L$b = b
+  L$z = z
+  L$J.m = J.m
+  L$J = sum(J.m)+W
+  L$N.m = N.m
+  L$A = A
+  L$V.deg = V.deg
+  L$V.l = V.left
+  L$V.r = V.right
+  return(L)
+}
+
+B.linnet = function(L){
+  # returns design matrix B with dimension N x J
+  
+  # design matrix for line segments
+  B = Matrix(matrix(0, sum(L$N.m), sum(L$J.m)+L$W), sparse = TRUE)
+  
+  # line specific B-splines
+  for (m in 1:L$M) {
+    B[((cumsum(L$N.m)-L$N.m)[m]+1):cumsum(L$N.m)[m], ((cumsum(L$J.m)-L$J.m)[m]+1):cumsum(L$J.m)[m]] = 
+      splineDesign(knots = L$tau[[m]], x = L$z[[m]], ord = 2, outer.ok = TRUE, sparse = TRUE)
+  }
+  
+  # vertex specific B-splines
+  for (v in 1:L$W) {
+    # left line ends
+    for (m in L$V.l[[v]]) {
+      B[((cumsum(L$N.m)-L$N.m)[m]+1):((cumsum(L$N.m)-L$N.m)[m] + length(which(1 - L$z[[m]]/L$delta[m] > 0))), sum(L$J.m)+v] = 
+        (1 - L$z[[m]]/L$delta[m])[which(1 - L$z[[m]]/L$delta[m] > 0)]
+    }
+    # right line ends
+    for (m in L$V.r[[v]]) {
+      B[(cumsum(L$N.m)[m]-length(which(1 - (L$d[m]-L$z[[m]])/L$delta[m] > 0))+1):cumsum(L$N.m)[m], sum(L$J.m)+v] = 
+        (1 - (L$d[m]-L$z[[m]])/L$delta[m])[which(1 - (L$d[m]-L$z[[m]])/L$delta[m] > 0)]
+    }
+  }
+  # check if B is a valid design matrix
+  if (sum(B) != sum(L$N.m)){
+    stop("Error! Rowsums of B are not equal to one!")
+  }
+  return(B)
+}
+
+K.linnet = function(L, r){
+  # returns the first or second penalty matrix K
+
+  # adjacency matrix of knots
+  A.tau = matrix(0, L$J, L$J)
+  
+  # on each line
+  for (m in 1:L$M) {
+    if (L$J.m[m] > 1){
+      A.tau[((cumsum(L$J.m)-L$J.m)[m]+2):cumsum(L$J.m)[m], ((cumsum(L$J.m)-L$J.m)[m]+1):(cumsum(L$J.m)[m]-1)] = 
+        diag(L$J.m[m]-1)
+    }
+  }
+  
+  # around each vertex
+  for (v in 1:L$W) {
+    # left line ends
+    for (m in L$V.l[[v]]) {
+      A.tau[sum(L$J.m)+v, (cumsum(L$J.m)-L$J.m)[m]+1] = 1
+    }
+    # right line ends
+    for (m in L$V.r[[v]]) {
+      A.tau[sum(L$J.m)+v, cumsum(L$J.m)[m]] = 1
+    }
+  }
+  
+  # filling the upper diagonal
+  A.tau = A.tau + t(A.tau)
+  
+  if (r == 1){
+    # find for every spline function the adjacent spline functions
+    adj = which(A.tau*lower.tri(A.tau) == 1, arr.ind = T)
+    
+    # initalizing first order difference matrix
+    D = Matrix(matrix(0, nrow(adj), L$J), sparse = TRUE)
+    
+    for(i in 1:nrow(adj)){
+      D[i, adj[i, 1]] = 1
+      D[i, adj[i, 2]] = -1
+    }
+    return(t(D)%*%D)
+  }
+  if (r == 2){
+    # find for every spline function the adjacent spline functions
+    adj1 = which(shortest.paths(graph_from_adjacency_matrix(A.tau)) == 1, arr.ind = T)
+    adj2 = which(tril(shortest.paths(graph_from_adjacency_matrix(A.tau))) == 2, arr.ind = T)
+    
+    # initalizing second order difference matrix
+    D = Matrix(matrix(0, nrow(adj2), L$J), sparse = TRUE)
+    
+    for (i in 1:nrow(adj2)) {
+      D[i, adj2[i, 1]] = D[i, adj2[i, 2]] = 1
+      D[i, intersect(adj1[which(adj1[, 1] == adj2[i, 1]), 2], adj1[which(adj1[, 1] == adj2[i, 2]), 2])] = -2
+    }
+    return(t(D)%*%D)
+  }
+  stop("Supply either r = 1 or r = 2")
+}
+
+y.lpp = function(L.lpp, L){
+  # returns vector y of length N with binned data
+  
+  # initializing
+  y.b = vector("list", L$M) 
+  y = c()
+  
+  for (m in 1:L$M) {
+    # positions of data on line m
+    y.m = sort(as.numeric(L.lpp$data[which(L.lpp$data$seg == m), ]$tp))*L$d[m]
+    
+    # bin data
+    y.b[[m]] = rep(0, length(L$z[[m]]) - 1)
+    for (k in 1:length(L$z[[m]])) {
+      y.b[[m]][k] = length(which(y.m < L$b[[m]][k+1] & y.m > L$b[[m]][k]))
+    }
+    
+    # stack into one vector
+    y = c(y, y.b[[m]])
+  }
+  return(Matrix(y, sparse = TRUE))
+}
+
+offset.linnet = function(L){
+  # returns vecor of offsets
+  
+  os = c()
+  for (m in 1:L$M) {
+    os = c(os, rep(L$h[m], length(L$z[[m]])))
+  }
+  return(log(os))
+}
+
+IWLS = function(B, K, y, os, rho, eps.gamma = 1e-4){
+  # perform iterative least squares estimation for a Poisson model with offset
+  
+  Delta.gamma = Inf
+  J = ncol(B) 
+  gamma.hat = rep(0, J)
+  X = cbind(B, os)
+  it = 0
+  while (Delta.gamma > eps.gamma) {
+    it = it + 1
+    mu = as.vector(exp(X%*%c(gamma.hat, 1)))
+    W = .symDiagonal(x = rep(mu, 1))  
+
+    # update vector of coefficients
+    gamma.hat.new = solve(t(B)%*%W%*%B + rho*K)%*%t(B)%*%(W%*%as.vector(B%*%gamma.hat)  + y - mu)
+    Delta.gamma = as.numeric(sqrt(t(gamma.hat-gamma.hat.new)%*%(gamma.hat-gamma.hat.new)))/
+      as.numeric(sqrt(t(gamma.hat)%*%gamma.hat))
+    gamma.hat = as.vector(gamma.hat.new)
+  }
+  return(list(coefs = gamma.hat, W = W))
+}
+
+gamma.hat.lpp = function(L.lpp, r, rho = 10, rho.max = 1e5, eps.rho = 1e-4, maxit.rho = 100, eps.gamma = 1e-4, FS = TRUE){
+  # returns the penalized spline coefficients gamma
+  
+  L = as.linnet(L.lpp)
+  B = B.linnet(L)
+  K = K.linnet(L, r)
+  y = y.lpp(L.lpp, L)
+  os = offset.linnet(L)
+  
+  # determine optimal smoothing parameter rho with Fellner-Schall method
+  if (FS){
+    Delta.rho = Inf
+    it.rho = 0
+    while(Delta.rho > eps.rho){
+      it.rho = it.rho + 1
+      gamma.hat = IWLS(B, K, y, os, rho, eps.gamma)
+      
+      # update rho
+      rho.new = as.vector(rho*(sum(diag(Matrix(MPinv(rho*K), sparse = TRUE)%*%K))
+                               - sum(diag(solve(t(B)%*%gamma.hat$W%*%B+rho*K)%*%K)))/(t(gamma.hat$coefs)%*%K%*%gamma.hat$coefs))
+      if (rho.new > rho.max) return(gamma.hat$coefs)
+      if (rho.new < 0){
+        warning("rho = 0 has occurred")
+      }
+      if (it.rho > maxit.rho){
+        warning("Stopped estimation of rho because maximum number of iterations has been reached!")
+        return(gamma.hat$coefs)
+      }
+      Delta.rho = abs(rho - rho.new)/rho
+      rho = rho.new
+    }
+    return(gamma.hat$coefs)
+  } else {
+    gamma.hat = IWLS(B, K, y, os, rho)
+    return(gamma.hat$coefs)
+  } 
+}
+
+B.new.linnet = function(L, z.new, N.m.new){
+  # returns design matrix for new data
+  
+  # design matrix for line segments
+  B = matrix(0, sum(N.m.new), sum(L$J.m)+L$W)
+  
+  # line specific B-splines
+  for (m in 1:L$M) {
+    B[((cumsum(N.m.new)-N.m.new)[m]+1):cumsum(N.m.new)[m], ((cumsum(L$J.m)-L$J.m)[m]+1):cumsum(L$J.m)[m]] = 
+      splineDesign(knots = L$tau[[m]], x = z.new[[m]]$pos, ord = 2, outer.ok = TRUE)
+  }
+  
+  # vertex specific B-splines
+  for (v in 1:L$W) {
+    # left line ends
+    for (m in L$V.l[[v]]) {
+      B[((cumsum(N.m.new)-N.m.new)[m]+1):((cumsum(N.m.new)-N.m.new)[m] + length(which(1 - z.new[[m]]$pos/L$delta[m] > 0))), sum(L$J.m)+v] = 
+        (1 - z.new[[m]]$pos/L$delta[m])[which(1 - z.new[[m]]$pos/L$delta[m] > 0)]
+    }
+    # right line ends
+    for (m in L$V.r[[v]]) {
+      B[(cumsum(N.m.new)[m]-length(which(1 - (L$d[m]-z.new[[m]]$pos)/L$delta[m] > 0))+1):cumsum(N.m.new)[m], sum(L$J.m)+v] = 
+        (1 - (L$d[m]-z.new[[m]]$pos)/L$delta[m])[which(1 - (L$d[m]-z.new[[m]]$pos)/L$delta[m] > 0)]
+    }
+  }
+  # check if B is a valid design matrix
+  if (sum(B) != sum(N.m.new)){
+    stop("Error! Rowsums of B are not equal to one!")
+  }
+  return(B)
+}
+
+intensity.psplines.lpp = function(L.lpp, r, rho = 10, FS = TRUE){
+  # returns an object of class "linim" according to the function density.lpp in the spatstat package
+  
+  # maximum likelihood estimate for gamma
+  gamma.hat = gamma.hat.lpp(L.lpp, r, rho)
+  
+  # network represented by different classes
+  L = as.linnet(L)
+  L.im = pixellate(L)
+  L.psp = as.psp(L.lpp)
+  
+  # pixels for plotting
+  pixels = which(L.im$v > 0, arr.ind = T)
+  
+  # x and y coordinates of the pixels
+  x.coord = y.coord = rep(0, nrow(pixels))
+  for (i in 1:nrow(pixels)) {
+    x.coord[i] = L.im$xcol[pixels[i, 2]]
+    y.coord[i] = L.im$yrow[pixels[i, 1]]
+  }
+  # points which need to be colored by intensity
+  L.ppp = ppp(x.coord, y.coord, window = L$window)
+  
+  # project points on network
+  projection = project2segment(L.ppp, L.psp)
+  
+  # findest nearest line segment for each image pixel and the location of the point on the line segment
+  line.nr = projection$mapXY
+  line.pos = projection$tp*L$d[line.nr]
+  
+  # create data frame
+  pixels = data.frame(matrix(c(x.coord, y.coord, line.nr, line.pos), length(line.nr), 4))
+  colnames(pixels) = c("x", "y", "m", "pos")
+  
+  # pixels by line segment from left end to right end
+  z.new = vector("list", L$M)
+  N.m.new = rep(0, L$M)
+  for (m in 1:L$M) {
+    z.new[[m]] = pixels[which(pixels$m == m), ]
+    z.new[[m]] = z.new[[m]][order(z.new[[m]]$pos), ]
+    N.m.new[m] = nrow(z.new[[m]])
+  }
+  
+  # design matrix for pixel locations
+  B.new = B.new.linnet(L, z.new, N.m.new)
+  
+  # matrix with pixel intensities
+  X = matrix(NA, L.im$dim[1], L.im$dim[2])
+  for (m in 1:L$M) {
+    intens.m = exp(B.new[((cumsum(N.m.new)-N.m.new)[m]+1):cumsum(N.m.new)[m], ]%*%gamma.hat)
+    for (i in 1:nrow(z.new[[m]])) {
+      X[which(L.im$yrow == z.new[[m]]$y[i]), which(L.im$xcol == z.new[[m]]$x[i])] = intens.m[i]
+    }
+  }
+  
+  # create "linim" object 
+  L.linim = as.linim(X, L)
+  return(L.linim)
+}
+
+intensity.edge = function(z, L, m, gamma.hat, n){
+  # returns the squared difference of the estimated and the true intensity 
+  
+  B = matrix(0, length(z), L$J.m[m]+2)
+  B[, 1] = (1-z/L$delta[m])*(1-z/L$delta[m] > 0)
+  B[, 2:(ncol(B)-1)] = splineDesign(knots = L$tau[[m]], x = z, ord = 2, outer.ok = TRUE)
+  B[, ncol(B)] = (1-(L$d[m]-z)/L$delta[m])*(1-(L$d[m]-z)/L$delta[m] > 0)
+
+  gamma.hat.m = c(gamma.hat[sum(L$J.m)+L$from[m]],
+              gamma.hat[((cumsum(L$J.m)-L$J.m)[m]+1):cumsum(L$J.m)[m]],
+              gamma.hat[sum(L$J.m)+L$to[m]])
+  if (min(z) >= 0 & max(z) <= L$d[m]) {
+    return((as.vector(exp(B%*%gamma.hat.m)) - n/L$d.L)^2)
+  } else {
+    stop("Wrong domain of z on this edge!")
+  }
+}
+
+ise.intensity.uniform = function(L.lpp, r){
+  # returns the edge-wise integrated squared error for uniformly distributed intensities 
+  
+  n = nrow(L.lpp$data)
+  L = as.linnet(L)
+  gamma.hat = gamma.hat.lpp(L.lpp, r)
+  ISE = rep(0, L$M)
+  for (m in 1:L$M) {
+    ISE[m] = integrate(intensity.edge, lower = 0, upper = L$d[m], L = L, m = m, gamma.hat = gamma.hat, n = n)$value
+  }
+  return(ISE)
+}
