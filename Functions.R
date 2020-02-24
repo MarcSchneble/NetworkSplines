@@ -1,8 +1,7 @@
 augment.linnet = function(L, delta, h){
-  # this function augments an object of class "linnet" by several attributes
-  # depending on delta and h
+  # this function augments an object of class "linnet" by several attributes depending on delta and h
   
-  # count of lines
+  # count of line segments
   M = L$lines$n
   
   # count of vertices
@@ -32,12 +31,12 @@ augment.linnet = function(L, delta, h){
   
   # initializing...
   tau = b = z = vector("list", M) 
-  V.left = V.right = con.left = con.right = vector("list", M)
-  N.m = J.m = 0
-
+  V.left = V.right = vector("list", M)
+  N.m = J.m = rep(0, M)
+  
   # do for every line segment
   for (m in 1:M) {
- 
+    
     # knot sequences tau
     tau[[m]] = seq(0, d[m], delta.m[m])
     
@@ -54,7 +53,7 @@ augment.linnet = function(L, delta, h){
     J.m[m] = length(tau[[m]]) - 2
   }
   
-  # degrees of vertices network
+  # degrees of vertices in the network
   V.deg = degree(graph_from_adjacency_matrix(A, mode = "undirected"))
   
   # incident lines to vertices
@@ -71,8 +70,6 @@ augment.linnet = function(L, delta, h){
     V.left[[i]] = sort(unique(V.left[[i]]))
     V.right[[i]] = sort(unique(V.right[[i]]))
   }
-  
-
   
   # add to linnet object
   L$M = M
@@ -128,7 +125,7 @@ B.linnet = function(L){
 
 K.linnet = function(L, r){
   # returns the first or second penalty matrix K
-
+  
   # adjacency matrix of knots
   A.tau = matrix(0, L$J, L$J)
   
@@ -208,7 +205,7 @@ y.lpp = function(L.lpp, L){
   return(Matrix(y, sparse = TRUE))
 }
 
-offset.linnet = function(L){
+offset.bin = function(L){
   # returns vecor of offsets
   
   os = c()
@@ -230,7 +227,7 @@ IWLS = function(B, K, y, os, rho, eps.gamma = 1e-4){
     it = it + 1
     mu = as.vector(exp(X%*%c(gamma.hat, 1)))
     W = .symDiagonal(x = rep(mu, 1))  
-
+    
     # update vector of coefficients
     gamma.hat.new = solve(t(B)%*%W%*%B + rho*K)%*%t(B)%*%(W%*%as.vector(B%*%gamma.hat)  + y - mu)
     Delta.gamma = as.numeric(sqrt(t(gamma.hat-gamma.hat.new)%*%(gamma.hat-gamma.hat.new)))/
@@ -240,14 +237,14 @@ IWLS = function(B, K, y, os, rho, eps.gamma = 1e-4){
   return(list(coefs = gamma.hat, W = W))
 }
 
-gamma.hat.lpp = function(L.lpp, r, rho = 10, rho.max = 1e5, eps.rho = 1e-4, maxit.rho = 100, eps.gamma = 1e-4, FS = TRUE){
+gamma.hat.lpp = function(L.lpp, r, rho = 10, rho.max = 1e5, eps.rho = 1e-3, maxit.rho = 100, eps.gamma = 1e-4, FS = TRUE){
   # returns the penalized spline coefficients gamma
   
   L = as.linnet(L.lpp)
   B = B.linnet(L)
   K = K.linnet(L, r)
   y = y.lpp(L.lpp, L)
-  os = offset.linnet(L)
+  os = offset.bin(L)
   
   # determine optimal smoothing parameter rho with Fellner-Schall method
   if (FS){
@@ -294,13 +291,18 @@ B.new.linnet = function(L, z.new, N.m.new){
   for (v in 1:L$W) {
     # left line ends
     for (m in L$V.l[[v]]) {
-      B[((cumsum(N.m.new)-N.m.new)[m]+1):((cumsum(N.m.new)-N.m.new)[m] + length(which(1 - z.new[[m]]$pos/L$delta[m] > 0))), sum(L$J.m)+v] = 
-        (1 - z.new[[m]]$pos/L$delta[m])[which(1 - z.new[[m]]$pos/L$delta[m] > 0)]
+      if (length(which(1 - z.new[[m]]$pos/L$delta[m] > 0)) > 0){
+        B[((cumsum(N.m.new)-N.m.new)[m]+1):((cumsum(N.m.new)-N.m.new)[m] + length(which(1 - z.new[[m]]$pos/L$delta[m] > 0))), sum(L$J.m)+v] = 
+          (1 - z.new[[m]]$pos/L$delta[m])[which(1 - z.new[[m]]$pos/L$delta[m] > 0)]
+      }
+      
     }
     # right line ends
     for (m in L$V.r[[v]]) {
-      B[(cumsum(N.m.new)[m]-length(which(1 - (L$d[m]-z.new[[m]]$pos)/L$delta[m] > 0))+1):cumsum(N.m.new)[m], sum(L$J.m)+v] = 
-        (1 - (L$d[m]-z.new[[m]]$pos)/L$delta[m])[which(1 - (L$d[m]-z.new[[m]]$pos)/L$delta[m] > 0)]
+      if (length(which(1 - (L$d[m]-z.new[[m]]$pos)/L$delta[m] > 0)) > 0){
+        B[(cumsum(N.m.new)[m]-length(which(1 - (L$d[m]-z.new[[m]]$pos)/L$delta[m] > 0))+1):cumsum(N.m.new)[m], sum(L$J.m)+v] = 
+          (1 - (L$d[m]-z.new[[m]]$pos)/L$delta[m])[which(1 - (L$d[m]-z.new[[m]]$pos)/L$delta[m] > 0)]
+      }
     }
   }
   # check if B is a valid design matrix
@@ -310,11 +312,11 @@ B.new.linnet = function(L, z.new, N.m.new){
   return(B)
 }
 
-intensity.psplines.lpp = function(L.lpp, r, rho = 10, FS = TRUE){
+intensity.pspline.lpp = function(L.lpp, r, rho = 10, FS = TRUE){
   # returns an object of class "linim" according to the function density.lpp in the spatstat package
   
   # maximum likelihood estimate for gamma
-  gamma.hat = gamma.hat.lpp(L.lpp, r, rho)
+  gamma.hat = gamma.hat.lpp(L.lpp, r = r, rho)
   
   # network represented by different classes
   L = as.linnet(L)
@@ -370,33 +372,82 @@ intensity.psplines.lpp = function(L.lpp, r, rho = 10, FS = TRUE){
   return(L.linim)
 }
 
-intensity.edge = function(z, L, m, gamma.hat, n){
+intensity.edge = function(z, L, m, gamma.hat, n, varphi){
   # returns the squared difference of the estimated and the true intensity 
   
   B = matrix(0, length(z), L$J.m[m]+2)
   B[, 1] = (1-z/L$delta[m])*(1-z/L$delta[m] > 0)
   B[, 2:(ncol(B)-1)] = splineDesign(knots = L$tau[[m]], x = z, ord = 2, outer.ok = TRUE)
   B[, ncol(B)] = (1-(L$d[m]-z)/L$delta[m])*(1-(L$d[m]-z)/L$delta[m] > 0)
-
+  
   gamma.hat.m = c(gamma.hat[sum(L$J.m)+L$from[m]],
-              gamma.hat[((cumsum(L$J.m)-L$J.m)[m]+1):cumsum(L$J.m)[m]],
-              gamma.hat[sum(L$J.m)+L$to[m]])
+                  gamma.hat[((cumsum(L$J.m)-L$J.m)[m]+1):cumsum(L$J.m)[m]],
+                  gamma.hat[sum(L$J.m)+L$to[m]])
   if (min(z) >= 0 & max(z) <= L$d[m]) {
-    return((as.vector(exp(B%*%gamma.hat.m)) - n/L$d.L)^2)
+    return((as.vector(exp(B%*%gamma.hat.m)) - varphi(seg = m, tp = z/L$d[m]))^2)
   } else {
     stop("Wrong domain of z on this edge!")
   }
 }
 
-ise.intensity.uniform = function(L.lpp, r){
-  # returns the edge-wise integrated squared error for uniformly distributed intensities 
+ise.intensity.splines = function(L.lpp, r, varphi){
+  # returns edge-wise ISE for penalized spline based estimate
   
   n = nrow(L.lpp$data)
   L = as.linnet(L)
   gamma.hat = gamma.hat.lpp(L.lpp, r)
   ISE = rep(0, L$M)
   for (m in 1:L$M) {
-    ISE[m] = integrate(intensity.edge, lower = 0, upper = L$d[m], L = L, m = m, gamma.hat = gamma.hat, n = n)$value
+    # very rarely, bad integral behavior causes an error
+    ISE[m] = tryCatch(integrate(f = intensity.edge, lower = 0, upper = L$d[m], L = L, m = m, 
+                                gamma.hat = gamma.hat, n = n, varphi = varphi, subdivisions = 1000)$value,
+                      error = function(cond){
+                        message(paste(cond), "")
+                        return(0)
+                      })
   }
   return(ISE)
+}
+
+squared.diff.linfun = function(z, m, L, f1, f2){
+  # returns squared difference of two functions f1 and f2 on L at z of segment m
+  
+  return((f1(tp = z/L$d[m], seg = m) - f2(tp = z/L$d[m], seg = m))^2)
+}
+
+ise.linfun = function(f1, f2, L){
+  # returns edge-wise ISE of f1 and f2 on L
+  
+  ISE = rep(0, L$M)
+  for (m in 1:L$M) {
+    # very rarely, bad integral behavior causes an error
+    ISE[m] = tryCatch(integrate(f = squared.diff.linfun, lower = 0, upper = L$d[m], m = m, 
+                                L = L, f1 = f1, f2 = f2, subdivisions = 1000)$value,
+                      error = function(cond){
+                        message(paste(cond), "")
+                        return(0)
+                      })
+  }
+  return(ISE)
+}
+
+simulation.study = function(s, delta, h, r, n, varphi, L, kernel = TRUE){
+  # function for parallel computing of penalized spline ISE and (if kernel = TRUE) kernel based ISE
+  
+  # simulate n points with intensity varphi
+  L.lpp = rlpp(n = n, varphi)
+  
+  # compute ISE for penalized spline based estimate
+  # very rarely, singularities occur and cause an error
+  ISE.pspline = tryCatch(sum(ise.intensity.splines(L.lpp, r, varphi))/n^2,
+                         error = function(cond){
+                           message(paste(cond), "")
+                           return(0)
+                         })
+  if (kernel){
+    ISE.kernel= sum(ise.linfun(as.linfun(density.lpp(L.lpp, sigma = bw.lppl(L.lpp))), varphi, L))/n^2
+    return(list(ISE.pspline = ISE.pspline, ISE.kernel = ISE.kernel))
+  } else {
+    return(list(ISE.pspline = ISE.pspline))
+  }
 }

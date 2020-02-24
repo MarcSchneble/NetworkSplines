@@ -38,8 +38,9 @@ vignettes/*.pdf
 # R Environment Variables
 .Renviron
 
-# data in csv format
-*.csv
+# large data in csv format
+*0.csv
+*7.csv
 
 # plots
 *.pdf
