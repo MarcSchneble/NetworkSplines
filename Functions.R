@@ -1,3 +1,138 @@
+symdiff <- function(a, b) union(setdiff(a, b), setdiff(b, a))
+
+reduce.linnet <- function(L){
+  
+  # degrees of vertices in the network
+  V.deg <- degree(graph_from_adjacency_matrix(L$A, mode = "undirected"))
+  
+  ind.deg.2 <- which(V.deg == 2)
+  ind.v.null <- ind.deg.2
+  ind.m.delete <- NULL
+  new.d <- new.from <- new.to <- NULL
+  
+  i <- 0
+  P <- list()
+  while(length(ind.deg.2) > 0){
+    i <- i+1
+    # find the two adjecent vertices to vertex with degree 2
+    adj <- which(L$A[ind.deg.2[1], ] == 1)
+    P[[i]] <- data.frame(from = c(adj[1], ind.deg.2[1]), 
+                         to = c(ind.deg.2[1], adj[2]),
+                         m = NA,
+                         length = NA)
+
+    # go into the direction of the first adjecent vertex and search for more
+    # vertices with degree 2
+    while(sum(L$A[adj[1], ]) == 2){
+      adj.new <- which(L$A[adj[1], ] == 1)
+      l <- adj.new[which(!is.element(adj.new, P[[i]]$from))]
+      P[[i]] <- rbind(c(l, adj[1], NA, NA), P[[i]])
+      adj[1] <- l
+    }
+    # go into the direction of the second adjecent vertex and search for more
+    # vertices with degree 2
+    while(sum(L$A[adj[2], ]) == 2){
+      adj.new <- which(L$A[adj[2], ] == 1)
+      r <- adj.new[which(!is.element(adj.new, P[[i]]$to))]
+      P[[i]] <- rbind(P[[i]], c(adj[2], r, NA, NA))
+      adj[2] <- r
+    }
+    for (k in 1:nrow(P[[i]])) {
+      P[[i]]$m[k] <- which(L$from == P[[i]]$from[k] & L$to == P[[i]]$to[k] | L$from == P[[i]]$to[k] & L$to == P[[i]]$from[k])
+      P[[i]]$length[k] <- L$d[P[[i]]$m[k]]
+    }
+    L$A[P[[i]]$from[1], P[[i]]$to[nrow(P[[i]])]] <- L$A[P[[i]]$to[nrow(P[[i]])], P[[i]]$from[1]] <- 1
+    # remove vertices from the current vector of vertices with degree 2
+    ind.deg.2 <- setdiff(ind.deg.2, P[[i]]$to[1:(nrow(P[[i]])-1)])
+    # add line segments to the delete vector
+    ind.m.delete <- unique(c(ind.m.delete, P[[i]]$m))
+    # compute new distances
+    new.d <- c(new.d, sum(P[[i]]$length))
+    new.from <- c(new.from, P[[i]]$from[1])
+    new.to <- c(new.to, P[[i]]$to[nrow(P[[i]])])
+  }
+  # update adjacency matrix
+  L$A[ind.v.null, ] <- 0
+  L$A[, ind.v.null] <- 0
+  # delete line segments and add new line segments
+  L$d <- c(L$d[- ind.m.delete], new.d)
+  L$from <- c(L$from[- ind.m.delete], new.from)
+  L$to <- c(L$to[- ind.m.delete], new.to)
+  L$M <- length(L$d)
+  
+  # ensure that J.m > 0
+  delta <- min(delta, min(L$d)/2)
+  # line specific knot distances
+  delta.m <- L$d/floor(L$d/delta)*(L$d/delta - floor(L$d/delta) < 0.5) + L$d/ceiling(L$d/delta)*(L$d/delta - floor(L$d/delta) >= 0.5)
+  
+  # ensure that h <= delta
+  h <- min(h, delta)
+  # line specific bin widths
+  h.m <- L$d/floor(L$d/h)*(L$d/h - floor(L$d/h) < 0.5) + L$d/ceiling(L$d/h)*(L$d/h - floor(L$d/h) >= 0.5)
+  
+  # initializing...
+  tau <- b <- z <- vector("list", L$M) 
+  V.left <- V.right <- vector("list", L$W)
+  N.m <- J.m <- rep(0, L$M)
+  
+  # do for every line segment
+  for (m in 1:L$M) {
+    
+    # knot sequences tau
+    tau[[m]] <- seq(0, L$d[m], delta.m[m])
+    
+    # bin boundaries b
+    b[[m]] <- seq(0, L$d[m], h.m[m])
+    
+    # characterization of bins by midpoints z
+    z[[m]] <- (b[[m]][1:(length(b[[m]])-1)] + b[[m]][2:length(b[[m]])])/2
+    
+    # total count of bins in the geometric network
+    N.m[m] <- length(z[[m]])
+    
+    # count of linear B-splines on line segment
+    J.m[m] <- length(tau[[m]]) - 2
+  }
+  
+  # degrees of vertices in the network
+  V.deg <- degree(graph_from_adjacency_matrix(L$A, mode = "undirected"))
+  
+  # incident lines to vertices
+  # V.out and V.in instead of V.left and V.right
+  for (v in 1:L$W) {
+    vv <- which(L$A[v, ] == 1)
+    if (length(vv) > 0){
+      q <- 0
+      for (j in vv) {
+        q <- q+1
+        V.left[[v]] <- c(V.left[[v]], which(L$to == vv[q] & L$from == v))
+        V.right[[v]] <- c(V.right[[v]], which(L$from == vv[q] & L$to == v))
+      }
+      V.left[[v]] <- sort(unique(V.left[[v]]))
+      V.right[[v]] <- sort(unique(V.right[[v]]))
+    } else {
+      V.left[[v]] <- which(1 == 0)
+      V.right[[v]] <- which(1 == 0)
+    }
+
+  }
+  
+  # replace in linnet object
+  L$delta <- delta.m
+  L$tau <- tau
+  L$b <- b
+  L$z <- z
+  L$J.m <- J.m
+  L$J <- sum(J.m) + L$W - length(ind.v.null)
+  L$N.m <- N.m
+  L$V.deg <- V.deg
+  L$V.l <- V.left
+  L$V.r <- V.right
+  L$ind.v.null <- ind.v.null
+
+  return(L)
+}
+
 augment.linnet = function(L, delta, h){
   # this function augments an object of class "linnet" by several attributes depending on delta and h
   
@@ -31,7 +166,7 @@ augment.linnet = function(L, delta, h){
   
   # initializing...
   tau = b = z = vector("list", M) 
-  V.left = V.right = vector("list", M)
+  V.left = V.right = vector("list", W)
   N.m = J.m = rep(0, M)
   
   # do for every line segment
@@ -88,6 +223,7 @@ augment.linnet = function(L, delta, h){
   L$V.deg = V.deg
   L$V.l = V.left
   L$V.r = V.right
+  L$ind.v.null <- NULL
   return(L)
 }
 
@@ -95,7 +231,7 @@ B.linnet = function(L){
   # returns design matrix B with dimension N x J
   
   # design matrix for line segments
-  B = Matrix(matrix(0, sum(L$N.m), sum(L$J.m)+L$W), sparse = TRUE)
+  B = Matrix(matrix(0, sum(L$N.m), L$J), sparse = TRUE)
   
   # line specific B-splines
   for (m in 1:L$M) {
@@ -103,16 +239,18 @@ B.linnet = function(L){
       splineDesign(knots = L$tau[[m]], x = L$z[[m]], ord = 2, outer.ok = TRUE, sparse = TRUE)
   }
   
+  vv <- 0
   # vertex specific B-splines
-  for (v in 1:L$W) {
+  for (v in setdiff(1:L$W, L$ind.v.null)) {
+    vv <- vv + 1
     # left line ends
     for (m in L$V.l[[v]]) {
-      B[((cumsum(L$N.m)-L$N.m)[m]+1):((cumsum(L$N.m)-L$N.m)[m] + length(which(1 - L$z[[m]]/L$delta[m] > 0))), sum(L$J.m)+v] = 
+      B[((cumsum(L$N.m)-L$N.m)[m]+1):((cumsum(L$N.m)-L$N.m)[m] + length(which(1 - L$z[[m]]/L$delta[m] > 0))), sum(L$J.m)+vv] = 
         (1 - L$z[[m]]/L$delta[m])[which(1 - L$z[[m]]/L$delta[m] > 0)]
     }
     # right line ends
     for (m in L$V.r[[v]]) {
-      B[(cumsum(L$N.m)[m]-length(which(1 - (L$d[m]-L$z[[m]])/L$delta[m] > 0))+1):cumsum(L$N.m)[m], sum(L$J.m)+v] = 
+      B[(cumsum(L$N.m)[m]-length(which(1 - (L$d[m]-L$z[[m]])/L$delta[m] > 0))+1):cumsum(L$N.m)[m], sum(L$J.m)+vv] = 
         (1 - (L$d[m]-L$z[[m]])/L$delta[m])[which(1 - (L$d[m]-L$z[[m]])/L$delta[m] > 0)]
     }
   }
@@ -246,16 +384,25 @@ gamma.hat.lpp = function(L.lpp, r, rho = 10, rho.max = 1e5, eps.rho = 1e-3, maxi
   y = y.lpp(L.lpp, L)
   os = offset.bin(L)
   
+  start <- Sys.time()
+  K.ginv <- ginv(as.matrix(Matrix(K)))
+  print(Sys.time() - start)
+  
   # determine optimal smoothing parameter rho with Fellner-Schall method
   if (FS){
     Delta.rho = Inf
     it.rho = 0
     while(Delta.rho > eps.rho){
       it.rho = it.rho + 1
-      gamma.hat = IWLS(B, K, y, os, rho, eps.gamma)
+      #start <- Sys.time()
+      #gamma.hat = IWLS(B, K, y, os, rho, eps.gamma)
+      #print(Sys.time() - start)
+      start <- Sys.time()
+      gamma.hat = gamma.hat.ML(B, K, y, os, rho)
+      print(Sys.time() - start)
       
-      # update rho
-      rho.new = as.vector(rho*(sum(diag(Matrix(MPinv(rho*K), sparse = TRUE)%*%K))
+      # update rho 
+      rho.new = as.vector(rho*(sum(diag(Matrix(K.ginv/rho, sparse = TRUE)%*%K))
                                - sum(diag(solve(t(B)%*%gamma.hat$W%*%B+rho*K)%*%K)))/(t(gamma.hat$coefs)%*%K%*%gamma.hat$coefs))
       if (rho.new > rho.max) return(gamma.hat$coefs)
       if (rho.new < 0){
@@ -267,6 +414,7 @@ gamma.hat.lpp = function(L.lpp, r, rho = 10, rho.max = 1e5, eps.rho = 1e-3, maxi
       }
       Delta.rho = abs(rho - rho.new)/rho
       rho = rho.new
+      print(rho)
     }
     return(gamma.hat$coefs)
   } else {
@@ -450,4 +598,29 @@ simulation.study = function(s, delta, h, r, n, varphi, L, kernel = TRUE){
   } else {
     return(list(ISE.pspline = ISE.pspline))
   }
+}
+
+gamma.hat.ML <- function(B, K, y, os, rho){
+  
+  J = ncol(B) 
+  y <- as.vector(y)
+  gamma <- rep(0, J)
+  gamma.hat <- optim(gamma, logL, gr = score, B = B, K = K, y = y, os = os, rho = rho, control = list(fnscale = -1, maxit = 1000),
+                  method = "CG")
+  
+  mu <- as.vector(exp(B%*%gamma.hat$par + os))
+  W <- .symDiagonal(x = rep(mu, 1)) 
+  
+  return(list(coefs = gamma.hat$par, W = W))
+}
+
+logL <- function(gamma, B, y, os, K, rho){
+  mu <- exp(B%*%gamma + os)
+  return(sum(y*log(mu) - mu) - 0.5*rho*
+           as.vector(gamma%*%K%*%gamma) )
+}
+
+score <- function(gamma, B, y, os, K, rho){
+  mu <- as.vector(exp(B%*%gamma + os))
+  return(as.vector(colSums((y - mu)*B) - rho*K%*%gamma))
 }
