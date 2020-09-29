@@ -1,5 +1,3 @@
-symdiff <- function(a, b) union(setdiff(a, b), setdiff(b, a))
-
 reduce.linnet <- function(L){
   
   # degrees of vertices in the network
