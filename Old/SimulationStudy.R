@@ -11,7 +11,7 @@ library(splines)
 library(parallel) 
 
 # load functions
-source(file = "Functions.R")
+source(file = "Old/FunctionsOld.R")
 
 # choose kind of simulation study
 create.plots = FALSE
@@ -42,7 +42,7 @@ if (create.plots){
     
     # intensity with kernel based method
     sigma = bw.lppl(L.lpp)
-    intens.kernel = density.lpp(L.lpp, sigma = sigma)
+    intens.kernel = density(L.lpp, sigma = sigma)
     
     # common color scale for both plots
     min.intens = min(min(intens.psplines$v[-which(is.na(intens.psplines$v))]), 

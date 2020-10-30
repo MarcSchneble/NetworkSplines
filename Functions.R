@@ -161,12 +161,13 @@ augment.linnet = function(L, delta, h){
   d.L = sum(d)
   
   # ensure that J.m > 0
-  delta = min(delta, min(L$dpath[which(L$dpath > 0)])/2)
+  #delta = min(delta, min(L$dpath[which(L$dpath > 0)])/2)
   # line specific knot distances
-  delta.m = d/floor(d/delta)*(d/delta - floor(d/delta) < 0.5) + d/ceiling(d/delta)*(d/delta - floor(d/delta) >= 0.5)
+  delta <- d*(delta > d) + delta*(delta <= d)
+  delta.m = pmin(d/floor(d/delta)*(d/delta - floor(d/delta) < 0.5) + d/ceiling(d/delta)*(d/delta - floor(d/delta) >= 0.5), d/2)
   
   # ensure that h <= delta
-  h = min(h, delta)
+  h = min(h, min(delta.m))
   # line specific bin widths
   h.m = d/floor(d/h)*(d/h - floor(d/h) < 0.5) + d/ceiling(d/h)*(d/h - floor(d/h) >= 0.5)
   
@@ -268,6 +269,60 @@ B.linnet = function(L){
   return(B)
 }
 
+get.design <- function(L.lpp, r, smooths = NULL, lins = NULL, K.net = NULL, m = 10, l = 2){
+  
+  L <- as.linnet(L.lpp)
+  K <- B <- ind.smooths <- vector("list", length(smooths) + 1)
+  if (is.null(K.net)){
+    K[[1]] <- K.linnet(L, r)
+  } else {
+    K[[1]] <- K.net
+  }
+
+  B[[1]] <- B.linnet(L)
+  
+  data <- bin.data(L.lpp, L, smooths = smooths, lins = lins)
+
+  Z <- B[[1]][data$id, ]
+  ind.smooths[[1]] <- 1:ncol(Z)
+  names.Z <- paste0("L.", 1:ncol(Z))
+
+  # add network covariates if needed
+  if (is.element("dist2V", c(smooths, lins))){
+    data$dist2V <- dist2V(L)[data$id]
+  }
+  
+  # smooth effects
+  if (length(smooths) > 0){
+    for (a in 1:length(smooths)) {
+      data.a <- data %>% pull(as.symbol(smooths[a]))
+      z <- sort(unique(data.a))
+      delta <- (max(z) - min(z))/(m-1)
+      k <- seq(min(z) - l*delta, max(z) + l*delta, delta)
+      B.uncentered <- splineDesign(knots = k, x = z, ord = l+1, outer.ok = TRUE)
+      # remove first column for identification
+      B[[a + 1]] <- sweep(B.uncentered, 2, colMeans(B.uncentered))[, -1]
+      # compute penalty
+      D <- diff(diag(ncol(B[[a + 1]]) + 1), differences = 2)[, -1]
+      K[[a + 1]] <- t(D)%*%D
+      # add to design matrix
+      Z <- cbind(Z, B[[a + 1]][match(data %>% pull(as.symbol(smooths[a])), z), ])
+      ind.smooths[[a + 1]] <- (ncol(Z) - ncol(B[[a + 1]]) + 1):ncol(Z) 
+      names.Z <- c(names.Z, paste0(smooths[a], ".", 1:ncol(B[[a + 1]])))
+    }
+  }
+
+  # linear effects
+  if (length(lins) > 0){
+    for (a in 1:length(lins)) {
+      Z <- cbind(Z, data %>% pull(as.symbol(lins[a])))
+      names.Z <- c(names.Z, lins[a])
+    }
+  }
+  
+  return(list(data = data, Z = Z, K = K, ind.smooths = ind.smooths))
+}
+
 K.linnet = function(L, r){
   # returns the first or second penalty matrix K
   
@@ -327,107 +382,118 @@ K.linnet = function(L, r){
   stop("Supply either r = 1 or r = 2")
 }
 
-y.lpp = function(L.lpp, L){
-  # returns vector y of length N with binned data
+bin.data <- function(L.lpp, L, smooths = NULL, lins = NULL){
+
+  # get covariates from every point on the network (if applicable)
+  name <- intersect(names(L.lpp$data), c(smooths, lins))
+  covariates <- as.data.frame(L.lpp$data) %>% select(all_of(name))
+  if (ncol(covariates) == 0){
+    covariates <- covariates %>% mutate(q = 1)
+  }
+  
+  # get all combinations of covariates and calculate the number of rows of the data matrix
+  covariates.comb <- covariates %>% distinct() %>% expand.grid() %>% as_tibble()
+  N <- sum(L$N.m)*nrow(covariates.comb)
   
   # initializing
-  y.b = vector("list", L$M) 
-  y = c()
+  data <- data.frame(matrix(NA, N, ncol(L.lpp$data) - 1))
+  names(data) <- c("id", "y", "h", names(L.lpp$data)[-(1:4)])
+  ind <- 1
   
-  for (m in 1:L$M) {
-    # positions of data on line m
-    y.m = sort(as.numeric(L.lpp$data[which(L.lpp$data$seg == m), ]$tp))*L$d[m]
-    
-    # bin data
-    y.b[[m]] = rep(0, length(L$z[[m]]) - 1)
-    for (k in 1:length(L$z[[m]])) {
-      y.b[[m]][k] = length(which(y.m < L$b[[m]][k+1] & y.m > L$b[[m]][k]))
-    }
-    
-    # stack into one vector
-    y = c(y, y.b[[m]])
-  }
-  return(Matrix(y, sparse = TRUE))
-}
-
-offset.bin = function(L){
-  # returns vecor of offsets
-  
-  os = c()
-  for (m in 1:L$M) {
-    os = c(os, rep(L$h[m], length(L$z[[m]])))
-  }
-  return(log(os))
-}
-
-IWLS = function(B, K, y, os, rho, eps.gamma = 1e-4){
-  # perform iterative least squares estimation for a Poisson model with offset
-  
-  Delta.gamma = Inf
-  J = ncol(B) 
-  gamma.hat = rep(0, J)
-  X = cbind(B, os)
-  it = 0
-  while (Delta.gamma > eps.gamma) {
-    it = it + 1
-    mu = as.vector(exp(X%*%c(gamma.hat, 1)))
-    W = .symDiagonal(x = rep(mu, 1))  
-    
-    # update vector of coefficients
-    gamma.hat.new = solve(t(B)%*%W%*%B + rho*K)%*%t(B)%*%(W%*%as.vector(B%*%gamma.hat)  + y - mu)
-    Delta.gamma = as.numeric(sqrt(t(gamma.hat-gamma.hat.new)%*%(gamma.hat-gamma.hat.new)))/
-      as.numeric(sqrt(t(gamma.hat)%*%gamma.hat))
-    gamma.hat = as.vector(gamma.hat.new)
-  }
-  return(list(coefs = gamma.hat, W = W))
-}
-
-gamma.hat.lpp = function(L.lpp, r, rho = 10, rho.max = 1e5, eps.rho = 0.01, maxit.rho = 100, eps.gamma = 1e-4, FS = TRUE){
-  # returns the penalized spline coefficients gamma
-  
-  L = as.linnet(L.lpp)
-  B = B.linnet(L)
-  K = K.linnet(L, r)
-  y = y.lpp(L.lpp, L)
-  os = offset.bin(L)
-  
-  start <- Sys.time()
-  K.ginv <- ginv(as.matrix(Matrix(K)))
-  print(Sys.time() - start)
-  
-  # determine optimal smoothing parameter rho with Fellner-Schall method
-  if (FS){
-    Delta.rho = Inf
-    it.rho = 0
-    while(Delta.rho > eps.rho){
-      it.rho = it.rho + 1
-      #start <- Sys.time()
-      #gamma.hat = IWLS(B, K, y, os, rho, eps.gamma)
-      #print(Sys.time() - start)
-      start <- Sys.time()
-      gamma.hat = gamma.hat.ML(B, K, y, os, rho)
-      print(Sys.time() - start)
+  for (j in 1:nrow(covariates.comb)) {
+    ind.cov <- which(do.call(paste, covariates) == do.call(paste, covariates.comb[j, ]))
+    data.sub <- L.lpp$data[ind.cov, ]
+    for (m in 1:L$M) {
+      # positions of data on line m
+      ind.m <- which(data.sub$seg == m)
+      y.m <- sort(as.numeric(data.sub[ind.m, ]$tp))*L$d[m]
       
-      # update rho 
-      rho.new = as.vector(rho*(sum(diag(Matrix(K.ginv/rho, sparse = TRUE)%*%K))
-                               - sum(diag(solve(t(B)%*%gamma.hat$W%*%B+rho*K)%*%K)))/(t(gamma.hat$coefs)%*%K%*%gamma.hat$coefs))
-      if (rho.new > rho.max) return(gamma.hat$coefs)
-      if (rho.new < 0){
-        warning("rho = 0 has occurred")
+      # bin data
+      y.b <- rep(0, length(L$z[[m]]))
+      for (k in 1:length(L$z[[m]])) {
+        y.b[k] <- length(which(y.m < L$b[[m]][k+1] & y.m > L$b[[m]][k]))
       }
-      if (it.rho > maxit.rho){
-        warning("Stopped estimation of rho because maximum number of iterations has been reached!")
-        return(gamma.hat$coefs)
-      }
-      Delta.rho = abs(rho - rho.new)/rho
-      rho = rho.new
-      print(rho)
+      
+      # stack into one vector
+      data$y[ind:(ind + length(y.b) - 1)] <- y.b
+      data$h[ind:(ind + length(y.b) - 1)] <- L$h[m]
+      ind <- ind + length(y.b)
     }
-    return(gamma.hat$coefs)
+    # add bin id for every row
+    data$id[((j-1)*sum(L$N.m) + 1):(j*sum(L$N.m))] <- 1:sum(L$N.m)
+    
+    # add covariates
+    if (ncol(data) > 3){
+      data[((j-1)*sum(L$N.m) + 1):(j*sum(L$N.m)), 4:ncol(data)] <- covariates.comb[j, ]
+    }
+
+  }
+  return(data)
+}
+
+dist2V <- function(L){
+  d <- rep(NA, sum(L$N.m))
+  ind <- 1
+  for (m in 1:L$M) {
+    d[ind:(ind + L$N.m[m] - 1)] <- pmin(L$z[[m]], L$d[m] - L$z[[m]])  
+    ind <- ind + L$N.m[m]
+  }
+  return(d)
+}
+
+fit.lpp = function(L.lpp, r, smooths = NULL, lins = NULL, K.ginv.net = NULL,
+                   rho = 10, rho.max = 1e5, eps.rho = 0.01, maxit.rho = 100){
+
+  # get design of the model
+  design <- get.design(L.lpp, r, smooths = smooths, lins = lins)
+  
+  # calculate generalized inverses
+  K.ginv <- vector("list", length(design$K))
+  if (is.null(K.ginv.net)) {
+    K.ginv[[1]] <- ginv(as.matrix(Matrix(design$K[[1]])))
   } else {
-    gamma.hat = IWLS(B, K, y, os, rho)
-    return(gamma.hat$coefs)
-  } 
+    K.ginv[[1]] <- K.ginv.net
+  }
+  if (length(design$K) > 1) {
+    for (a in 2:length(design$K)) {
+      K.ginv[[a]] <- ginv(as.matrix(Matrix(design$K[[a]])))
+    }
+  }
+  rho <- rep(rho, length(design$K))
+
+  # determine optimal smoothing parameter rho with Fellner-Schall method
+  Delta.rho <- Inf
+  it.rho <- 0
+  theta <- rep(0, ncol(design$Z))
+  while(Delta.rho > eps.rho){
+    print(rho)
+    it.rho <- it.rho + 1
+    fit <- optim(theta, fn = logL, gr = score, design = design, rho = rho, 
+                       control = list(fnscale = -1, maxit = 1000),
+                       method = "L-BFGS-B")
+    theta <- fit$par
+    V <- solve(fisher(theta, design, rho))
+    
+    # update rho 
+    rho.new <- rep(NA, length(design$K))
+    for (a in 1:length(design$K)) {
+      rho.new[a] <- as.vector(rho[a]*(sum(diag(Matrix(K.ginv[[a]]/rho[a], sparse = TRUE)%*%design$K[[a]]))
+                                - sum(diag(V[design$ind.smooths[[a]], design$ind.smooths[[a]]]%*%design$K[[a]])))/
+                             (t(theta[design$ind.smooths[[a]]])%*%design$K[[a]]%*%theta[design$ind.smooths[[a]]]))
+    }
+
+    if (any(rho.new > rho.max)) break
+    if (any(rho.new < 0)){
+      warning("rho = 0 has occurred")
+    }
+    if (it.rho > maxit.rho){
+      warning("Stopped estimation of rho because maximum number of iterations has been reached!")
+      break
+    }
+    Delta.rho <- sqrt(sum((rho.new - rho)^2))/sqrt(sum((rho)^2))
+    rho <- rho.new
+  }
+  return(list(theta.hat = theta, se.hat = sqrt(diag(V)), ind.smooths = design$ind.smooths))
 }
 
 B.new.linnet = function(L, z.new, N.m.new){
@@ -438,8 +504,10 @@ B.new.linnet = function(L, z.new, N.m.new){
   
   # line specific B-splines
   for (m in 1:L$M) {
-    B[((cumsum(N.m.new)-N.m.new)[m]+1):cumsum(N.m.new)[m], ((cumsum(L$J.m)-L$J.m)[m]+1):cumsum(L$J.m)[m]] = 
-      splineDesign(knots = L$tau[[m]], x = z.new[[m]]$pos, ord = 2, outer.ok = TRUE)
+    if (nrow(z.new[[m]]) > 0) {
+      B[((cumsum(N.m.new)-N.m.new)[m]+1):cumsum(N.m.new)[m], ((cumsum(L$J.m)-L$J.m)[m]+1):cumsum(L$J.m)[m]] = 
+        splineDesign(knots = L$tau[[m]], x = z.new[[m]]$pos, ord = 2, outer.ok = TRUE)
+    }
   }
   
   # vertex specific B-splines
@@ -467,11 +535,24 @@ B.new.linnet = function(L, z.new, N.m.new){
   return(B)
 }
 
-intensity.pspline.lpp = function(L.lpp, r, rho = 10, FS = TRUE){
+intensity.pspline.lpp = function(L.lpp, r, smooths = NULL, lins = NULL, K.ginv.net = NULL){
   # returns an object of class "linim" according to the function density.lpp in the spatstat package
   
   # maximum likelihood estimate for gamma
-  gamma.hat = gamma.hat.lpp(L.lpp, r = r, rho)
+  fit <- tryCatch(
+    fit.lpp(L.lpp, r, smooths = smooths, lins = lins, K.ginv.net = K.ginv.net),
+    error = function(cond) {
+      message("An error has occurred. Here's the original error message:")
+      message(cond)
+      message("\nReduce the value of delta and try again!")
+      return(NULL)
+    }
+  )
+  if (is.null(fit)){
+    return(NULL)
+  }
+
+  gamma.hat.net <- fit$theta.hat[fit$ind.smooths[[1]]]
   
   # network represented by different classes
   L = as.linnet(L)
@@ -516,7 +597,7 @@ intensity.pspline.lpp = function(L.lpp, r, rho = 10, FS = TRUE){
   # matrix with pixel intensities
   X = matrix(NA, L.im$dim[1], L.im$dim[2])
   for (m in 1:L$M) {
-    intens.m = exp(B.new[((cumsum(N.m.new)-N.m.new)[m]+1):cumsum(N.m.new)[m], ]%*%gamma.hat)
+    intens.m = exp(B.new[((cumsum(N.m.new)-N.m.new)[m]+1):cumsum(N.m.new)[m], ]%*%gamma.hat.net)
     for (i in 1:nrow(z.new[[m]])) {
       X[which(L.im$yrow == z.new[[m]]$y[i]), which(L.im$xcol == z.new[[m]]$x[i])] = intens.m[i]
     }
@@ -525,6 +606,26 @@ intensity.pspline.lpp = function(L.lpp, r, rho = 10, FS = TRUE){
   # create "linim" object 
   L.linim = as.linim(X, L)
   return(L.linim)
+}
+
+simulation.chicago <- function(s, delta, h, r, n, varphi, kernel = TRUE, K.ginv.net = NULL) {
+  
+  # simulate n points with intensity f
+  L.lpp <- rlpp(n = n, f = varphi)
+  
+  # compute ISE for penalized spline based estimate
+  # very rarely, singularities occur and cause an error
+  ISE.pspline = tryCatch(sum(ise.intensity.splines(L.lpp, r, varphi, K.ginv.net = K.ginv.net))/n^2,
+                         error = function(cond){
+                           message(paste(cond), "")
+                           return(0)
+                         })
+  if (kernel){
+    ISE.kernel= sum(ise.linfun(as.linfun(density.lpp(L.lpp, sigma = as.numeric(bw.lppl(L.lpp)))), varphi, L))/n^2
+    return(list(ISE.pspline = ISE.pspline, ISE.kernel = ISE.kernel))
+  } else {
+    return(list(ISE.pspline = ISE.pspline))
+  }
 }
 
 intensity.edge = function(z, L, m, gamma.hat, n, varphi){
@@ -545,16 +646,17 @@ intensity.edge = function(z, L, m, gamma.hat, n, varphi){
   }
 }
 
-ise.intensity.splines = function(L.lpp, r, varphi){
+ise.intensity.splines = function(L.lpp, r, varphi, K.ginv.net = NULL){
   # returns edge-wise ISE for penalized spline based estimate
   
-  n = nrow(L.lpp$data)
-  L = as.linnet(L)
-  gamma.hat = gamma.hat.lpp(L.lpp, r)
-  ISE = rep(0, L$M)
+  n <- nrow(L.lpp$data)
+  L <- as.linnet(L.lpp)
+  fit <- fit.lpp(L.lpp, r, K.ginv.net = K.ginv.net)
+  gamma.hat <- fit$theta.hat
+  ISE <- rep(0, L$M)
   for (m in 1:L$M) {
     # very rarely, bad integral behavior causes an error
-    ISE[m] = tryCatch(integrate(f = intensity.edge, lower = 0, upper = L$d[m], L = L, m = m, 
+    ISE[m] <- tryCatch(integrate(f = intensity.edge, lower = 0, upper = L$d[m], L = L, m = m, 
                                 gamma.hat = gamma.hat, n = n, varphi = varphi, subdivisions = 1000)$value,
                       error = function(cond){
                         message(paste(cond), "")
@@ -590,44 +692,53 @@ simulation.study = function(s, delta, h, r, n, varphi, L, kernel = TRUE){
   # function for parallel computing of penalized spline ISE and (if kernel = TRUE) kernel based ISE
   
   # simulate n points with intensity varphi
-  L.lpp = rlpp(n = n, varphi)
+  L.lpp <- rlpp(n = n, varphi)
   
   # compute ISE for penalized spline based estimate
   # very rarely, singularities occur and cause an error
-  ISE.pspline = tryCatch(sum(ise.intensity.splines(L.lpp, r, varphi))/n^2,
+  ISE.pspline <- tryCatch(sum(ise.intensity.splines(L.lpp, r, varphi))/n^2,
                          error = function(cond){
                            message(paste(cond), "")
                            return(0)
                          })
   if (kernel){
-    ISE.kernel= sum(ise.linfun(as.linfun(density.lpp(L.lpp, sigma = bw.lppl(L.lpp))), varphi, L))/n^2
+    ISE.kernel <- sum(ise.linfun(as.linfun(density.lpp(L.lpp, sigma = as.numeric(bw.lppl(L.lpp)))), varphi, L))/n^2
     return(list(ISE.pspline = ISE.pspline, ISE.kernel = ISE.kernel))
   } else {
     return(list(ISE.pspline = ISE.pspline))
   }
 }
 
-gamma.hat.ML <- function(B, K, y, os, rho){
-  
-  J = ncol(B) 
-  y <- as.vector(y)
-  gamma <- rep(0, J)
-  gamma.hat <- optim(gamma, logL, gr = score, B = B, K = K, y = y, os = os, rho = rho, control = list(fnscale = -1, maxit = 1000),
-                  method = "L-BFGS-B")
-  
-  mu <- as.vector(exp(B%*%gamma.hat$par + os))
-  W <- .symDiagonal(x = rep(mu, 1)) 
-  
-  return(list(coefs = gamma.hat$par, W = W))
+
+logL <- function(theta, design, rho){
+  mu <- exp(as.vector(design$Z%*%theta) + log(design$data$h))
+  logL <- sum(design$data$y*log(mu) - mu)
+  for (a in 1:length(design$K)) {
+    logL <- logL - 0.5*rho[a]*
+      as.vector(theta[design$ind.smooths[[a]]]%*%design$K[[a]]%*%theta[design$ind.smooths[[a]]])
+  }
+  return(logL)
 }
 
-logL <- function(gamma, B, y, os, K, rho){
-  mu <- exp(B%*%gamma + os)
-  return(sum(y*log(mu) - mu) - 0.5*rho*
-           as.vector(gamma%*%K%*%gamma) )
+score <- function(theta, design, rho){
+  mu <- exp(as.vector(design$Z%*%theta) + log(design$data$h))
+  score <- as.vector(colSums((design$data$y - mu)*design$Z))
+  for (a in 1:length(design$K)) {
+    score[design$ind.smooths[[a]]] <- 
+      score[design$ind.smooths[[a]]] - rho[a]*design$K[[a]]%*%theta[design$ind.smooths[[a]]]  
+  }
+  
+  return(score)
 }
 
-score <- function(gamma, B, y, os, K, rho){
-  mu <- as.vector(exp(B%*%gamma + os))
-  return(as.vector(colSums((y - mu)*B) - rho*K%*%gamma))
+fisher <- function(theta, design, rho){
+  mu <- exp(as.vector(design$Z%*%theta) + log(design$data$h))
+  Mu <- Matrix(0, nrow(design$Z), nrow(design$Z))
+  diag(Mu) <- mu
+  fisher <- t(design$Z)%*%Mu%*%design$Z
+  for (a in 1:length(design$K)) {
+    fisher[design$ind.smooths[[a]], design$ind.smooths[[a]]] <- 
+      fisher[design$ind.smooths[[a]], design$ind.smooths[[a]]] + rho[a]*design$K[[a]]
+  }
+  return(fisher)
 }

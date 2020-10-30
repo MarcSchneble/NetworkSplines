@@ -11,6 +11,7 @@ library(splines)
 library(dplyr)
 library(lubridate)
 library(readxl)
+library(tidyr)
 
 # load functions
 source(file = "Functions.R")
@@ -88,11 +89,14 @@ dev.off()
 # parking data ----
 
 # only consider parking lots which are located on the map
-data.CBD <- filter(data, is.element(data$StreetMarker, L.lpp$data$marks), h.start >= 8, h.start < 20)
-marks <- select(data.CBD, h.start, weekday)
+data.CBD <- filter(data, is.element(data$StreetMarker, L.lpp$data$marks), h.start >= 8, h.start < 20, d.start <= 10)
+covariates <- select(data.CBD, h.start, weekday)
 
 # observed processes
-L.lpp.parking <- as.lpp(x = data.CBD$lon, y = data.CBD$lat, L = L, marks = marks)
+L.lpp.parking <- as.lpp(x = data.CBD$lon, y = data.CBD$lat, L = L)
+L.lpp.parking$marks <- list()
+L.lpp.parking$marks$covariates <- covariates
+L.lpp.parking$marks$kind <- c("e", "e")
 
 #
 intens.morning <- intensity.pspline.lpp(L.lpp.morning, r)/52

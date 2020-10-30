@@ -10,7 +10,7 @@ library(VCA)
 library(splines) 
 
 # load functions
-source(file = "Functions.R")
+source(file = "Old/FunctionsOld.R")
 
 # augmented Chicago network
 delta = 5
