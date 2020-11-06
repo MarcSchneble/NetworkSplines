@@ -6,7 +6,6 @@ library(spatstat)
 library(igraph)
 library(Matrix)
 library(MASS)
-library(VCA)
 library(splines)
 library(dplyr)
 library(lubridate)
@@ -40,7 +39,7 @@ L <- spatstat::rescale(L, s = s, unitname = "Meters")
 delta <- 50
 h <- 5
 r <- 2
-L <- augment.linnet(L, delta, h)
+L <- augment.linnet(L, delta, h, r)
 
 # read parking data
 data <- readRDS("Data/data_2019_clean.rds")
@@ -62,11 +61,12 @@ marks <- projection$Xproj$marks[which(projection$d < 20)]
 L.lpp <- as.lpp(seg = seg, tp = tp, L = L, marks = marks)
 
 # intensity estimate of parking lots
-intens.lots <- intensity.pspline.lpp(L.lpp, r)
+intens.lots <- intensity.pspline.lpp(L.lpp)
+intens.lots.voronoi <- densityVoronoi(L.lpp, f = 0.5, nrep = 100, dimyx = c(256, 256))
 
 # only where intensity is at least 0.1
 intens.lots.adj <- intens.lots
-intens.lots.adj$v[which(intens.lots$v < 0.1, arr.ind = TRUE)] = NA
+intens.lots.adj$v[which(intens.lots$v < 0.05, arr.ind = TRUE)] = NA
 
 # plot parking lots on the geometric network
 pdf(file = "Plots/MelbourneLots.pdf", width = 10, height = 8)
@@ -76,14 +76,19 @@ plot(L.lpp, use.marks = FALSE, pch = 16, cols = "red", lwd = 3, legend = FALSE,
 dev.off()
 
 # plot intensity of parking lots
-min.intens <- min(intens.lots$v[-which(is.na(intens.lots$v))])
-max.intens <- max(intens.lots$v[-which(is.na(intens.lots$v))])
+min.intens <- min(intens.lots$v, na.rm = TRUE)
+max.intens <- max(intens.lots$v, na.rm = TRUE)
 pdf(file = "Plots/MelbourneIntensityLots.pdf", width = 10, height = 8)
 par(mar=c(0, 1, 2, 1), cex = 2.4)
-plot(intens.lots, box = TRUE, 
+plot(intens.lots, box = TRUE, log = TRUE,
      main = "Intensity of On-Street Parking Lots in \n the Western CBD of Melbourne, Australia")
 dev.off()
 
+pdf(file = "Plots/MelbourneIntensityLots.pdf", width = 10, height = 8)
+par(mar=c(0, 1, 2, 1), cex = 2.4)
+plot(intens.lots.adj, box = TRUE, log = TRUE,
+     main = "Intensity of On-Street Parking Lots in \n the Western CBD of Melbourne, Australia")
+dev.off()
 
 
 # parking data ----

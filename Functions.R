@@ -411,15 +411,17 @@ bin.data <- function(L.lpp, L, smooths = NULL, lins = NULL){
     mutate(id = as.integer(id), y = as.double(y), h = as.double(h))
   
   # set factor variable if applicable
-  for (a in 1:length(name)) {
-    if (is.factor(covariates %>% pull(sym(name[a])))){
-      data <- mutate(data, !!name[a] := factor(NA, levels = levels(covariates %>% pull(sym(name[a])))))
+  if (length(name) > 0){
+    for (a in 1:length(name)) {
+      if (is.factor(covariates %>% pull(sym(name[a])))){
+        data <- mutate(data, !!name[a] := factor(NA, levels = levels(covariates %>% pull(sym(name[a])))))
+      }
+      if (is.double(covariates %>% pull(sym(name[a])))){
+        data <- mutate(data, !!name[a] := as.double(NA))
+      } 
     }
-    if (is.double(covariates %>% pull(sym(name[a])))){
-      data <- mutate(data, !!name[a] := as.double(NA))
-    } 
   }
-  
+
   ind <- 1
   for (j in 1:nrow(covariates.comb)) {
     ind.cov <- which(do.call(paste, covariates) == do.call(paste, covariates.comb[j, ]))
@@ -635,24 +637,27 @@ intensity.pspline.lpp = function(L.lpp, smooths = NULL, lins = NULL, dimyx = c(2
   return(L.linim)
 }
 
-simulation.chicago <- function(s, delta, h, r, n, varphi, kernel = TRUE) {
+simulation.chicago <- function(s, delta, h, r, n, varphi, kernel = FALSE, voronoi = FALSE) {
   
   # simulate n points with intensity f
   L.lpp <- rlpp(n = n, f = varphi)
   
   # compute ISE for penalized spline based estimate
   # very rarely, singularities occur and cause an error
-  ISE.pspline = tryCatch(sum(ise.intensity.splines(L.lpp, varphi))/n^2,
-                         error = function(cond){
-                           message(paste(cond), "")
-                           return(0)
-                         })
+  ISE.pspline = sum(ise.intensity.splines(L.lpp, varphi))/n^2
+  
   if (kernel){
-    ISE.kernel= sum(ise.linfun(as.linfun(density.lpp(L.lpp, sigma = as.numeric(bw.lppl(L.lpp, sigma = seq(10, 500, 10))))), varphi, L))/n^2
-    return(list(ISE.pspline = ISE.pspline, ISE.kernel = ISE.kernel))
+    ISE.kernel = sum(ise.linfun(as.linfun(density.lpp(L.lpp, sigma = as.numeric(bw.lppl(L.lpp, sigma = seq(10, 500, 10))), dimyx = c(256, 256))), varphi, L))/n^2
   } else {
-    return(list(ISE.pspline = ISE.pspline))
+    ISE.kernel = NA
   }
+  if (voronoi & n <= 150){
+    f <- as.numeric(bw.voronoi(L.lpp))
+    ISE.voronoi = sum(ise.linfun(as.linfun(densityVoronoi(L.lpp, f = f, nrep = 100, dimyx = c(256, 256))), varphi, L))/n^2
+  } else {
+    ISE.voronoi = NA
+  }
+  return(list(ISE.pspline = ISE.pspline, ISE.kernel = ISE.kernel, ISE.voronoi = ISE.voronoi))
 }
 
 simulation.chicago.covariates.internal <- function(s, delta, h, r, n, varphi){
