@@ -233,7 +233,7 @@ if (simulation.internal){
   
   for (i in 1:length(n)) {
     
-    no_cores <- detectCores() - 2
+    no_cores <- min(detectCores() - 2, 10)
     set.seed(1)
     
     

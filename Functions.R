@@ -275,7 +275,7 @@ B.linnet = function(L){
   return(B)
 }
 
-get.design <- function(L.lpp, smooths = NULL, lins = NULL, m = 10, l = 2){
+get.design <- function(L.lpp, smooths = NULL, lins = NULL, offset = NULL, m = 10, l = 2){
   
   L <- as.linnet(L.lpp)
   K <- B <- ind.smooths <- vector("list", length(smooths) + 1)
@@ -287,7 +287,7 @@ get.design <- function(L.lpp, smooths = NULL, lins = NULL, m = 10, l = 2){
   # baseline intensity of the network
   Z <- B[[1]][data$id, ]
   ind.smooths[[1]] <- 1:ncol(Z)
-  names.Z <- paste0("L.", 1:ncol(Z))
+  names.theta <- paste0("L.", 1:ncol(Z))
   
   # add network covariates if needed
   if (is.element("dist2V", c(smooths, lins))){
@@ -301,6 +301,9 @@ get.design <- function(L.lpp, smooths = NULL, lins = NULL, m = 10, l = 2){
   }
   if (is.element("xcoord", c(smooths, lins))){
     data$xcoord <- get.x(L)[data$id]
+  }
+  if ("dist2Vdiscrete" %in% c(smooths, lins)){
+    data$dist2Vdiscrete <- dist2Vdiscrete(L)
   }
   
   # smooth effects
@@ -319,19 +322,26 @@ get.design <- function(L.lpp, smooths = NULL, lins = NULL, m = 10, l = 2){
       # add to design matrix
       Z <- cbind(Z, B[[a + 1]][match(data %>% pull(as.symbol(smooths[a])), z), ])
       ind.smooths[[a + 1]] <- (ncol(Z) - ncol(B[[a + 1]]) + 1):ncol(Z) 
-      names.Z <- c(names.Z, paste0(smooths[a], ".", 1:ncol(B[[a + 1]])))
+      names.theta <- c(names.theta, paste0(smooths[a], ".", 1:ncol(B[[a + 1]])))
     }
   }
   
   # linear effects
   if (length(lins) > 0){
     ff <- as.formula(paste("~", paste(lins, collapse = " + ")))
-    model.matrix.lin <- model.matrix(ff, data = data)[, -1] 
-    Z <- cbind(Z, model.matrix.lin)
-    names.Z <- c(names.Z, colnames(model.matrix.lin))
+    model.matrix.lin <- model.matrix(ff, data = data)
+    Z <- cbind(Z, model.matrix.lin[, -1])
+    names.theta <- c(names.theta, colnames(model.matrix.lin)[-1])
   }
   
-  return(list(data = data, Z = Z, K = K, ind.smooths = ind.smooths))
+  # offset
+  if (!is.null(offset)){
+    data$offset <- get.offset(offset, L)[data$id]
+  } else {
+    data$offset <- 1
+  }
+  
+  return(list(data = data, Z = Z, K = K, ind.smooths = ind.smooths, names.theta = names.theta))
 }
 
 K.linnet = function(L, r){
@@ -403,7 +413,7 @@ bin.data <- function(L.lpp, L, smooths = NULL, lins = NULL){
   }
   
   # get all combinations of covariates and calculate the number of rows of the data matrix
-  covariates.comb <- covariates %>% distinct() %>% expand.grid() %>% distinct() %>% as_tibble()
+  covariates.comb <- sapply(covariates %>% distinct() %>% expand.grid() %>% distinct() %>% as_tibble() , function(x) sort(x)) %>% as_tibble()
   N <- sum(L$N.m)*nrow(covariates.comb)
   
   # initializing
@@ -418,6 +428,9 @@ bin.data <- function(L.lpp, L, smooths = NULL, lins = NULL){
       }
       if (is.double(covariates %>% pull(sym(name[a])))){
         data <- mutate(data, !!name[a] := as.double(NA))
+      } 
+      if (is.integer(covariates %>% pull(sym(name[a])))){
+        data <- mutate(data, !!name[a] := as.integer(NA))
       } 
     }
   }
@@ -483,11 +496,42 @@ get.x <- function(L){
   return(x)
 }
 
-fit.lpp = function(L.lpp, smooths = NULL, lins = NULL, 
+dist2Vdiscrete <- function(L, threshold = 20){
+  d <- rep(NA, sum(L$N.m))
+  ind <- 1
+  for (m in 1:L$M) {
+    d[ind:(ind + L$N.m[m] - 1)] <- ifelse(pmin(L$z[[m]], L$d[m] - L$z[[m]]) <= threshold, 1, 0)
+    ind <- ind + L$N.m[m]
+  }
+  return(d)
+}
+
+get.offset <- function(offset, L){
+  if ("linim" %in% class(offset)){
+    L.linfun <- as.linfun(L.im)
+    offset <- rep(NA, sum(L$N.m))
+    ind <- 1
+    for (m in 1:L$M) {
+      offset[ind:(ind + length(L$z[[m]]) - 1)] <- L.linfun(seg = m, tp = L$z[[m]]/L$d[m])
+      ind <- ind + length(L$z[[m]])
+    }
+    return(offset)
+  }
+
+  if ("lpp" %in% class(offset)){
+    data <- bin.data(L.lpp, L)
+    return(data$y + 1)
+  }
+  
+  stop("Offset must be of class ``linim'' or ``lpp''.")
+
+}
+
+fit.lpp = function(L.lpp, smooths = NULL, lins = NULL, offset = NULL,
                    rho = 10, rho.max = 1e5, eps.rho = 0.01, maxit.rho = 100){
   
   # get design of the model
-  design <- get.design(L.lpp, smooths = smooths, lins = lins)
+  design <- get.design(L.lpp, smooths = smooths, lins = lins, offset = offset)
   
   # determine optimal smoothing parameter rho with Fellner-Schall method
   rho <- rep(rho, length(design$K))
@@ -495,7 +539,6 @@ fit.lpp = function(L.lpp, smooths = NULL, lins = NULL,
   it.rho <- 0
   theta <- rep(0, ncol(design$Z))
   while(Delta.rho > eps.rho){
-    print(rho)
     it.rho <- it.rho + 1
     fit <- optim(theta, fn = logL, gr = score, design = design, rho = rho, 
                  control = list(fnscale = -1, maxit = 1000, factr = 1e4),
@@ -506,7 +549,7 @@ fit.lpp = function(L.lpp, smooths = NULL, lins = NULL,
     # update rho 
     rho.new <- rep(NA, length(design$K))
     for (a in 1:length(design$K)) {
-      rho.new[a] <- as.vector(rho[a]*(rankMatrix(L.lpp$domain$K, method = "qr.R")[1]/rho - 
+      rho.new[a] <- as.vector(rho[a]*(rankMatrix(design$K[[a]], method = "qr.R")[1]/rho[a] - 
                                         sum(diag(V[design$ind.smooths[[a]], design$ind.smooths[[a]]]%*%design$K[[a]])))/
                                 (t(theta[design$ind.smooths[[a]]])%*%design$K[[a]]%*%theta[design$ind.smooths[[a]]]))
     }
@@ -519,10 +562,32 @@ fit.lpp = function(L.lpp, smooths = NULL, lins = NULL,
       warning("Stopped estimation of rho because maximum number of iterations has been reached!")
       break
     }
+    print(rho.new)
     Delta.rho <- sqrt(sum((rho.new - rho)^2))/sqrt(sum((rho)^2))
     rho <- rho.new
   }
-  return(list(theta.hat = theta, se.hat = sqrt(diag(V)), ind.smooths = design$ind.smooths))
+  
+  names.covariates <- sub("\\..*", "", design$names.theta)
+  effects <- as.data.frame(table(names.covariates)) %>% as_tibble()
+  colnames(effects) <- c("name", "df") 
+  effects <- effects %>% mutate(effect = NA, se = NA)
+
+  # linear effects
+  for (a in effects$name[which(effects$df == 1)]) {
+    effects$effect[which(effects$name == a)] <- fit$par[which(names.covariates == a)]
+    effects$se[which(effects$name == a)] <- sqrt(V[which(names.covariates == a), which(names.covariates == a)])
+  }
+  
+  # to do
+  smooth.effects <- vector("list", length(design$ind.smooths))
+  if (length(design$ind.smooths) > 1){
+    for (i in 2:length(design$ind.smooths)) {
+      smooth.effects[[i]]$x <- unique(design$data[[]])
+      smooth.effects[[i]]$y <- unique(as.vector(design$Z[, design$ind.smooths[[i]]]%*%theta[design$ind.smooths[[i]]]))
+    }
+  }
+  
+  return(list(theta.hat = theta, V = V, ind.smooths = design$ind.smooths, names.theta = design$names.theta, effects = effects))
 }
 
 B.new.linnet = function(L, z.new, N.m.new){
@@ -564,12 +629,13 @@ B.new.linnet = function(L, z.new, N.m.new){
   return(B)
 }
 
-intensity.pspline.lpp = function(L.lpp, smooths = NULL, lins = NULL, dimyx = c(256, 256)){
+intensity.pspline.lpp = function(L.lpp, smooths = NULL, lins = NULL, offset = NULL, dimyx = c(256, 256),
+                                 eps.rho = 1e-3){
   # returns an object of class "linim" according to the function density.lpp in the spatstat package
   
   # maximum likelihood estimate for gamma
   fit <- tryCatch(
-    fit.lpp(L.lpp, smooths = smooths, lins = lins),
+    fit.lpp(L.lpp, smooths = smooths, lins = lins, offset = offset, eps.rho = eps.rho),
     error = function(cond) {
       message("An error has occurred. Here's the original error message:")
       message(cond)
@@ -634,6 +700,8 @@ intensity.pspline.lpp = function(L.lpp, smooths = NULL, lins = NULL, dimyx = c(2
   
   # create "linim" object 
   L.linim = as.linim(X, L)
+  L.linim$effects <- fit$effects
+  
   return(L.linim)
 }
 
@@ -663,7 +731,7 @@ simulation.chicago <- function(s, delta, h, r, n, varphi, kernel = FALSE, vorono
 simulation.chicago.covariates.internal <- function(s, delta, h, r, n, varphi){
   L.lpp <- rlpp(n, varphi)
   lins <- c("reldist2Vfrom", "xcoord")
-  fit <- fit.lpp(L.lpp, lins = lins, rho = 1000)
+  fit <- fit.lpp(L.lpp, lins = lins, rho = 100, rho.max = 1e4)
   return(list(beta = tail(fit$theta.hat, 2), se = tail(fit$se.hat, 2)))
 }
 
@@ -772,7 +840,7 @@ simulation.study = function(s, delta, h, r, n, varphi, L, kernel = TRUE){
 
 
 logL <- function(theta, design, rho){
-  mu <- exp(as.vector(design$Z%*%theta) + log(design$data$h))
+  mu <- exp(as.vector(design$Z%*%theta) + log(design$data$h) + log(design$data$offset))
   logL <- sum(design$data$y*log(mu) - mu)
   for (a in 1:length(design$K)) {
     logL <- logL - 0.5*rho[a]*
@@ -782,7 +850,7 @@ logL <- function(theta, design, rho){
 }
 
 score <- function(theta, design, rho){
-  mu <- exp(as.vector(design$Z%*%theta) + log(design$data$h))
+  mu <- exp(as.vector(design$Z%*%theta) + log(design$data$h) + log(design$data$offset))
   score <- as.vector(colSums((design$data$y - mu)*design$Z))
   for (a in 1:length(design$K)) {
     score[design$ind.smooths[[a]]] <- 
@@ -793,7 +861,7 @@ score <- function(theta, design, rho){
 }
 
 fisher <- function(theta, design, rho){
-  mu <- exp(as.vector(design$Z%*%theta) + log(design$data$h))
+  mu <- exp(as.vector(design$Z%*%theta) + log(design$data$h) + log(design$data$offset))
   Mu <- Matrix(0, nrow(design$Z), nrow(design$Z))
   diag(Mu) <- mu
   fisher <- t(design$Z)%*%Mu%*%design$Z

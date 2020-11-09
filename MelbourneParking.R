@@ -42,13 +42,21 @@ r <- 2
 L <- augment.linnet(L, delta, h, r)
 
 # read parking data
-data <- readRDS("Data/data_2019_clean.rds")
-lots <- readRDS("Data/Parking_Lots.rds") %>% filter(sensor == 1) %>%
+data.parking <- readRDS("Data/data_2019_clean.rds")
+data.lots <- readRDS("Data/Parking_Lots.rds") %>% filter(sensor == 1) %>%
   select(lon, lat, StreetMarker) %>%
   mutate(lon = (lon - min.lon)/s, lat = (lat - min.lat)/s)
-data <- left_join(data, lots, by = "StreetMarker")
+data.parking <- left_join(data.parking, data.lots, by = "StreetMarker") %>% filter(h.start >= 8, h.start < 20, State == 1)
 
-L.ppp <- ppp(x = lots$lon , y = lots$lat, L$window, marks = lots$StreetMarker)
+# remove parking lots with too few events
+freq <- as.data.frame(table(data.parking$StreetMarker))
+lots.retain <- filter(freq, Freq >= 1000) %>% pull(Var1) 
+data.parking <- filter(data.parking, StreetMarker %in% lots.retain)
+data.parking$StreetMarker <- factor(data.parking$StreetMarker, levels = unique(data.parking$StreetMarker))
+data.lots <- filter(data.lots, StreetMarker %in% data.parking$StreetMarker)
+
+
+L.ppp <- ppp(x = data.lots$lon , y = data.lots$lat, L$window, marks = data.lots$StreetMarker)
 L.psp <- as.psp(L)
 projection <- project2segment(L.ppp, L.psp)
 
@@ -59,10 +67,12 @@ marks <- projection$Xproj$marks[which(projection$d < 20)]
 
 # create L.lpp object with nearby parking lots
 L.lpp <- as.lpp(seg = seg, tp = tp, L = L, marks = marks)
+L <- as.linnet(L.lpp)
 
 # intensity estimate of parking lots
+intens.lots.covariates <- intensity.pspline.lpp(L.lpp, lins = "dist2Vdiscrete")
 intens.lots <- intensity.pspline.lpp(L.lpp)
-intens.lots.voronoi <- densityVoronoi(L.lpp, f = 0.5, nrep = 100, dimyx = c(256, 256))
+#intens.lots.voronoi <- densityVoronoi(L.lpp, f = 0.5, nrep = 100, dimyx = c(256, 256))
 
 # only where intensity is at least 0.1
 intens.lots.adj <- intens.lots
@@ -94,15 +104,29 @@ dev.off()
 # parking data ----
 
 # only consider parking lots which are located on the map
-data.CBD <- filter(data, is.element(data$StreetMarker, L.lpp$data$marks), h.start >= 8, h.start < 20, d.start <= 10)
+data.CBD <- filter(data.parking, data.parking$StreetMarker %in% L.lpp$data$marks)
 covariates <- select(data.CBD, h.start, weekday)
 
 # observed processes
 L.lpp.parking <- as.lpp(x = data.CBD$lon, y = data.CBD$lat, L = L)
-L.lpp.parking$marks <- list()
-L.lpp.parking$marks$covariates <- covariates
-L.lpp.parking$marks$kind <- c("e", "e")
+L.lpp.parking$data$h.start <- covariates$h.start
 
-#
-intens.morning <- intensity.pspline.lpp(L.lpp.morning, r)/52
+# with covariates
+fit <- fit.lpp(L.lpp.parking, smooths = "h.start")
+ind <- fit$ind.smooths[[2]]
+gamma.h.start <- fit$theta.hat[ind]
+design <- get.design(L.lpp.parking, smooths = "h.start")
+mu <- exp(as.vector(design$Z[, ind]%*%gamma.h.start))
+plot(design$data$h.start, mu)
 
+# without covariates
+intens.parking <- intensity.pspline.lpp(L.lpp.parking, smooths = "h.start", eps.rho = 1e-3)
+intens.parking.adj <- intens.parking
+intens.parking.adj$v[which(is.na(intens.lots.adj$v) | intens.parking$v < 20)] <- NA
+plot(intens.parking.adj)
+plot(intens.parking.adj, log = TRUE)
+
+intens.fluctuation <- intens.parking.adj
+intens.fluctuation$v <- intens.fluctuation$v/intens.lots.adj$v
+plot(intens.fluctuation)
+plot(intens.fluctuation, log = TRUE)
