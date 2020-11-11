@@ -303,7 +303,7 @@ get.design <- function(L.lpp, smooths = NULL, lins = NULL, offset = NULL, m = 10
     data$xcoord <- get.x(L)[data$id]
   }
   if ("dist2Vdiscrete" %in% c(smooths, lins)){
-    data$dist2Vdiscrete <- dist2Vdiscrete(L)
+    data$dist2Vdiscrete <- dist2Vdiscrete(L)[data$id]
   }
   
   # smooth effects
@@ -327,10 +327,12 @@ get.design <- function(L.lpp, smooths = NULL, lins = NULL, offset = NULL, m = 10
   }
   
   # linear effects
+  ind.lins <- NULL
   if (length(lins) > 0){
     ff <- as.formula(paste("~", paste(lins, collapse = " + ")))
     model.matrix.lin <- model.matrix(ff, data = data)
     Z <- cbind(Z, model.matrix.lin[, -1])
+    ind.lins <- (ncol(Z) - ncol(model.matrix.lin) + 2):ncol(Z)
     names.theta <- c(names.theta, colnames(model.matrix.lin)[-1])
   }
   
@@ -341,7 +343,7 @@ get.design <- function(L.lpp, smooths = NULL, lins = NULL, offset = NULL, m = 10
     data$offset <- 1
   }
   
-  return(list(data = data, Z = Z, K = K, ind.smooths = ind.smooths, names.theta = names.theta))
+  return(list(data = data, Z = Z, B = B, K = K, ind.smooths = ind.smooths, ind.lins = ind.lins, names.theta = names.theta))
 }
 
 K.linnet = function(L, r){
@@ -413,7 +415,12 @@ bin.data <- function(L.lpp, L, smooths = NULL, lins = NULL){
   }
   
   # get all combinations of covariates and calculate the number of rows of the data matrix
-  covariates.comb <- sapply(covariates %>% distinct() %>% expand.grid() %>% distinct() %>% as_tibble() , function(x) sort(x)) %>% as_tibble()
+  # get all combinations of covariates and calculate the number of rows of the data matrix
+  covariates.comb <- covariates %>% distinct() %>% expand.grid() %>% distinct() %>% as_tibble()
+  for (a in 1:length(covariates.comb)) {
+    covariates.comb <- arrange(covariates.comb, !!sym(names(covariates.comb[a])))
+  }
+  
   N <- sum(L$N.m)*nrow(covariates.comb)
   
   # initializing
@@ -496,7 +503,7 @@ get.x <- function(L){
   return(x)
 }
 
-dist2Vdiscrete <- function(L, threshold = 20){
+dist2Vdiscrete <- function(L, threshold = 25){
   d <- rep(NA, sum(L$N.m))
   ind <- 1
   for (m in 1:L$M) {
@@ -567,23 +574,28 @@ fit.lpp = function(L.lpp, smooths = NULL, lins = NULL, offset = NULL,
     rho <- rho.new
   }
   
-  names.covariates <- sub("\\..*", "", design$names.theta)
-  effects <- as.data.frame(table(names.covariates)) %>% as_tibble()
-  colnames(effects) <- c("name", "df") 
-  effects <- effects %>% mutate(effect = NA, se = NA)
-
-  # linear effects
-  for (a in effects$name[which(effects$df == 1)]) {
-    effects$effect[which(effects$name == a)] <- fit$par[which(names.covariates == a)]
-    effects$se[which(effects$name == a)] <- sqrt(V[which(names.covariates == a), which(names.covariates == a)])
-  }
+  # effects in one table
+  effects <- list(linear = NULL, smooth = NULL)
   
-  # to do
-  smooth.effects <- vector("list", length(design$ind.smooths))
-  if (length(design$ind.smooths) > 1){
-    for (i in 2:length(design$ind.smooths)) {
-      smooth.effects[[i]]$x <- unique(design$data[[]])
-      smooth.effects[[i]]$y <- unique(as.vector(design$Z[, design$ind.smooths[[i]]]%*%theta[design$ind.smooths[[i]]]))
+  #linear effects
+  if (length(lins) > 0) {
+    effects$linear <- tibble(name = tail(design$names.theta, length(design$ind.lins)), estimate = NA, se = NA)
+    for (i in 1:length(design$ind.lins)) {
+      effects$linear$estimate[i] <- theta[design$ind.lins[i]]
+      effects$linear$se[i] <- sqrt(V[design$ind.lins[i], design$ind.lins[i]])
+    }
+  } 
+
+  # smooth effects
+  effects$smooth <- vector("list", length(smooths))
+  names(effects$smooth) <- smooths
+  if (length(smooths) > 0){
+    for (i in 1:length(smooths)) {
+      confidence.band <- get.confidence.band(theta, V, design, i, smooths)
+      effects$smooth[[i]] <- tibble(x = unique(design$data[[smooths[i]]]),
+                                    y = unique(as.vector(design$Z[, design$ind.smooths[[i + 1]]]%*%theta[design$ind.smooths[[i + 1]]])),
+                                    lwr = confidence.band$lower,
+                                    upr = confidence.band$upper)
     }
   }
   
@@ -705,7 +717,7 @@ intensity.pspline.lpp = function(L.lpp, smooths = NULL, lins = NULL, offset = NU
   return(L.linim)
 }
 
-simulation.chicago <- function(s, delta, h, r, n, varphi, kernel = FALSE, voronoi = FALSE) {
+simulation.chicago <- function(s, delta, h, r, n, varphi, kernel = FALSE, voronoi = FALSE, kernel2d = FALSE) {
   
   # simulate n points with intensity f
   L.lpp <- rlpp(n = n, f = varphi)
@@ -719,8 +731,13 @@ simulation.chicago <- function(s, delta, h, r, n, varphi, kernel = FALSE, vorono
   } else {
     ISE.kernel = NA
   }
-  if (voronoi & n <= 150){
-    f <- as.numeric(bw.voronoi(L.lpp))
+  if (kernel2d){
+    ISE.kernel2d <- sum(ise.linfun(as.linfun(density.lpp(L.lpp, sigma = bw.scott(L.lpp), distance = "euclidean", dimyx = c(256, 256))), varphi, L))/n^2
+  } else {
+    ISE.kernel2d <- NA
+  }
+  if (voronoi){
+    f <- as.numeric(bw.voronoi(L.lpp, prob = seq(0.3, 0.7, 0.1), nrep = 25))
     ISE.voronoi = sum(ise.linfun(as.linfun(densityVoronoi(L.lpp, f = f, nrep = 100, dimyx = c(256, 256))), varphi, L))/n^2
   } else {
     ISE.voronoi = NA
@@ -732,7 +749,7 @@ simulation.chicago.covariates.internal <- function(s, delta, h, r, n, varphi){
   L.lpp <- rlpp(n, varphi)
   lins <- c("reldist2Vfrom", "xcoord")
   fit <- fit.lpp(L.lpp, lins = lins, rho = 100, rho.max = 1e4)
-  return(list(beta = tail(fit$theta.hat, 2), se = tail(fit$se.hat, 2)))
+  return(list(beta = tail(fit$theta.hat, 2), se = fit$effects$linear$se))
 }
 
 simulation.chicago.covariates.external <- function(s, delta, h, r, beta, varphi){
@@ -740,7 +757,7 @@ simulation.chicago.covariates.external <- function(s, delta, h, r, beta, varphi)
   cov.t <- cov.type <- NULL
   L.lpp <- rlpp(n = 0, f = varphi)
   for (i in 1:10) {
-    t <- rnorm(1)
+    t <- round(rnorm(1), 2)
     for (j in c("A", "B")) {
       mu <- exp(beta[1] + t*beta[2] + beta[3]*(j == "B"))
       n <- rpois(1, mu)
@@ -749,12 +766,17 @@ simulation.chicago.covariates.external <- function(s, delta, h, r, beta, varphi)
       L.lpp <- superimpose.lpp(L.lpp, rlpp(n = n, f = varphi))
     }
   }
-  L.lpp$data$t <- round(cov.t, 2)
+  L.lpp$data$t <- cov.t
   L.lpp$data$type <- as.factor(cov.type)
   
   lins <- c("t", "type")
-  fit <- fit.lpp(L.lpp, lins = lins, rho = 100)
-  return(list(beta = tail(fit$theta.hat, 2), se = tail(fit$se.hat, 2)))
+  fit <- tryCatch(
+    fit.lpp(L.lpp, lins = lins, rho = 10, eps.rho = 1e-2),
+    error = function(cond){
+      return(NULL)
+    }
+  ) 
+  return(list(beta = tail(fit$theta.hat, 2), se = fit$effects$linear$se))
 }
 
 intensity.edge = function(z, L, m, gamma.hat, n, varphi){
@@ -870,4 +892,24 @@ fisher <- function(theta, design, rho){
       fisher[design$ind.smooths[[a]], design$ind.smooths[[a]]] + rho[a]*design$K[[a]]
   }
   return(fisher)
+}
+
+get.confidence.band <- function(theta, V, design, i, smooths, q = 0.05, R = 10000){
+  gamma <- theta[design$ind.smooths[[i + 1]]]
+  cov <- V[design$ind.smooths[[i + 1]], design$ind.smooths[[i + 1]]]
+  x <- unique(design$data[[smooths[i]]])
+  cov <- as.matrix(Matrix(cov))
+  
+  set.seed(1)
+  mu.sim <- matrix(0, R, length(x))
+  for (j in 1:R) {
+    gamma.sim <- rmvn(1, gamma, cov)
+    mu.sim[j, ] <- design$B[[i + 1]]%*%gamma.sim
+  }
+  lower <- upper <- rep(0, ncol(mu.sim))
+  for (j in 1:ncol(mu.sim)) {
+    lower[j] <- quantile(mu.sim[, j], probs = q/2)
+    upper[j] <- quantile(mu.sim[, j], probs = 1-q/2)
+  }
+  return(list(lower = lower, upper = upper))
 }

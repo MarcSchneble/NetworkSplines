@@ -1,5 +1,6 @@
 # adjust path
 setwd("~/NetworkSplines")
+rm(list = ls())
 
 # load required packages
 library(spatstat)
@@ -11,6 +12,8 @@ library(dplyr)
 library(lubridate)
 library(readxl)
 library(tidyr)
+library(mgcv)
+library(ggplot2)
 
 # load functions
 source(file = "Functions.R")
@@ -36,7 +39,7 @@ s <- L$dpath[12, 94]/1900
 L <- spatstat::rescale(L, s = s, unitname = "Meters")
 
 # choose parameters and augment L
-delta <- 50
+delta <- 25
 h <- 5
 r <- 2
 L <- augment.linnet(L, delta, h, r)
@@ -46,7 +49,9 @@ data.parking <- readRDS("Data/data_2019_clean.rds")
 data.lots <- readRDS("Data/Parking_Lots.rds") %>% filter(sensor == 1) %>%
   select(lon, lat, StreetMarker) %>%
   mutate(lon = (lon - min.lon)/s, lat = (lat - min.lat)/s)
-data.parking <- left_join(data.parking, data.lots, by = "StreetMarker") %>% filter(h.start >= 8, h.start < 20, State == 1)
+data.parking <- left_join(data.parking, data.lots, by = "StreetMarker") %>% 
+  filter(h.start >= 8, h.start < 20, State == 1) %>%
+  mutate(t = 0.25*floor(m.start/15))
 
 # remove parking lots with too few events
 freq <- as.data.frame(table(data.parking$StreetMarker))
@@ -70,34 +75,36 @@ L.lpp <- as.lpp(seg = seg, tp = tp, L = L, marks = marks)
 L <- as.linnet(L.lpp)
 
 # intensity estimate of parking lots
-intens.lots.covariates <- intensity.pspline.lpp(L.lpp, lins = "dist2Vdiscrete")
 intens.lots <- intensity.pspline.lpp(L.lpp)
+intens.lots.covariates <- intensity.pspline.lpp(L.lpp, lins = "dist2Vdiscrete")
 #intens.lots.voronoi <- densityVoronoi(L.lpp, f = 0.5, nrep = 100, dimyx = c(256, 256))
 
 # only where intensity is at least 0.1
 intens.lots.adj <- intens.lots
+intens.lots.covariates.adj <- intens.lots.covariates
 intens.lots.adj$v[which(intens.lots$v < 0.05, arr.ind = TRUE)] = NA
+intens.lots.covariates.adj$v[which(intens.lots.covariates$v < 0.05, arr.ind = TRUE)] = NA
 
 # plot parking lots on the geometric network
 pdf(file = "Plots/MelbourneLots.pdf", width = 10, height = 8)
-par(mar=c(0, 1, 2, 1), cex = 2.4)
+par(mar=c(0, 1, 2, 1), cex = 1.6)
 plot(L.lpp, use.marks = FALSE, pch = 16, cols = "red", lwd = 3, legend = FALSE,
-     main = "On-Street Parking Lots in the \n Western CBD of Melbourne, Australia")
+     main = "On-street parking lots in the \n CBD of Melbourne, Australia")
 dev.off()
 
 # plot intensity of parking lots
 min.intens <- min(intens.lots$v, na.rm = TRUE)
 max.intens <- max(intens.lots$v, na.rm = TRUE)
 pdf(file = "Plots/MelbourneIntensityLots.pdf", width = 10, height = 8)
-par(mar=c(0, 1, 2, 1), cex = 2.4)
-plot(intens.lots, box = TRUE, log = TRUE,
-     main = "Intensity of On-Street Parking Lots in \n the Western CBD of Melbourne, Australia")
+par(mar=c(0, 1, 2, 1), cex = 1.6)
+plot(intens.lots.adj, log = TRUE,
+     main = "Intensity of on-street parking lots in \n the CBD of Melbourne, Australia")
 dev.off()
 
-pdf(file = "Plots/MelbourneIntensityLots.pdf", width = 10, height = 8)
-par(mar=c(0, 1, 2, 1), cex = 2.4)
-plot(intens.lots.adj, box = TRUE, log = TRUE,
-     main = "Intensity of On-Street Parking Lots in \n the Western CBD of Melbourne, Australia")
+pdf(file = "Plots/MelbourneIntensityLotsCovariates.pdf", width = 10, height = 8)
+par(mar=c(0, 1, 2, 1), cex = 1.6)
+plot(intens.lots.covariates.adj, log = TRUE,
+     main = "Intensity of on-street parking Lots in \n the CBD of Melbourne, Australia")
 dev.off()
 
 
@@ -105,24 +112,27 @@ dev.off()
 
 # only consider parking lots which are located on the map
 data.CBD <- filter(data.parking, data.parking$StreetMarker %in% L.lpp$data$marks)
-covariates <- select(data.CBD, h.start, weekday)
+covariates <- select(data.CBD, t, weekday)
 
 # observed processes
 L.lpp.parking <- as.lpp(x = data.CBD$lon, y = data.CBD$lat, L = L)
-L.lpp.parking$data$h.start <- covariates$h.start
+L.lpp.parking$data$t <- covariates$t
 
-# with covariates
-fit <- fit.lpp(L.lpp.parking, smooths = "h.start")
-ind <- fit$ind.smooths[[2]]
-gamma.h.start <- fit$theta.hat[ind]
-design <- get.design(L.lpp.parking, smooths = "h.start")
-mu <- exp(as.vector(design$Z[, ind]%*%gamma.h.start))
-plot(design$data$h.start, mu)
+# fitting
+intens.parking <- intensity.pspline.lpp(L.lpp.parking, lins = "dist2Vdiscrete", smooths = "t", eps.rho = 1e-3)
 
-# without covariates
-intens.parking <- intensity.pspline.lpp(L.lpp.parking, smooths = "h.start", eps.rho = 1e-3)
+# plot smooth effects
+g <- ggplot(intens.parking$effects$smooth$t) + 
+  geom_line(aes(x = x, y = y)) + 
+  geom_ribbon(aes(x = x, ymin = lwr, ymax = upr), color = "red") + 
+  scale_x_continuous(limits = c(8, 20), breaks = 8:20) +
+  theme_bw()
+pdf(file = "Plots/Melbourne_smooth_t.pdf", width = 6, height = 4)
+print(g)
+dev.off()
+
 intens.parking.adj <- intens.parking
-intens.parking.adj$v[which(is.na(intens.lots.adj$v) | intens.parking$v < 20)] <- NA
+intens.parking.adj$v[which(is.na(intens.lots.adj$v) | intens.parking$v < 0.1)] <- NA
 plot(intens.parking.adj)
 plot(intens.parking.adj, log = TRUE)
 
