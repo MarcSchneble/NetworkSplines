@@ -717,32 +717,29 @@ intensity.pspline.lpp = function(L.lpp, smooths = NULL, lins = NULL, offset = NU
   return(L.linim)
 }
 
-simulation.chicago <- function(s, delta, h, r, n, varphi, kernel = FALSE, voronoi = FALSE, kernel2d = FALSE) {
+simulation.chicago <- function(s, delta, h, r, n, varphi, kernel = FALSE, kernel2d = FALSE) {
   
   # simulate n points with intensity f
-  L.lpp <- rlpp(n = n, f = varphi)
+  L.lpp <- rlpp(n = n, f = intens.kernel)
   
-  # compute ISE for penalized spline based estimate
-  # very rarely, singularities occur and cause an error
-  ISE.pspline = sum(ise.intensity.splines(L.lpp, varphi))/n^2
-  
-  if (kernel){
-    ISE.kernel = sum(ise.linfun(as.linfun(density.lpp(L.lpp, sigma = as.numeric(bw.lppl(L.lpp, sigma = seq(10, 500, 10))), dimyx = c(256, 256))), varphi, L))/n^2
+  # compute estimates and ISE
+  intens.pspline <- intensity.pspline.lpp(L.lpp)
+  ISE.pspline <- integral.linfun((intens.pspline - varphi)^2)/n^2
+  if (kernel) {
+    sigma <- as.numeric(bw.lppl(L.lpp, sigma = c(seq(10, 100, 5), seq(110, 250, 10))))
+    intens.kernel <- density.lpp(L.lpp, sigma = sigma, dimyx = c(256, 256))
+    ISE.kernel <- integral.linfun((intens.kernel - varphi)^2)/n^2
   } else {
-    ISE.kernel = NA
+    ISE.kernel <- NULL
   }
   if (kernel2d){
-    ISE.kernel2d <- sum(ise.linfun(as.linfun(density.lpp(L.lpp, sigma = bw.scott(L.lpp), distance = "euclidean", dimyx = c(256, 256))), varphi, L))/n^2
+    sigma <- bw.scott(L.lpp)
+    intens.kernel2d <- density.lpp(L.lpp, sigma = sigma, distance = "euclidean", dimyx = c(256, 256))
+    ISE.kernel2d <- integral.linfun((intens.kernel2d - varphi)^2)/n^2
   } else {
-    ISE.kernel2d <- NA
+    ISE.kernel2d <- NULL
   }
-  if (voronoi){
-    f <- as.numeric(bw.voronoi(L.lpp, prob = seq(0.3, 0.7, 0.1), nrep = 25))
-    ISE.voronoi = sum(ise.linfun(as.linfun(densityVoronoi(L.lpp, f = f, nrep = 100, dimyx = c(256, 256))), varphi, L))/n^2
-  } else {
-    ISE.voronoi = NA
-  }
-  return(list(ISE.pspline = ISE.pspline, ISE.kernel = ISE.kernel, ISE.voronoi = ISE.voronoi))
+  return(list(ISE.pspline = ISE.pspline, ISE.kernel = ISE.kernel, ISE.kernel2d = ISE.kernel2d))
 }
 
 simulation.chicago.covariates.internal <- function(s, delta, h, r, n, varphi){
