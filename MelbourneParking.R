@@ -89,24 +89,24 @@ intens.lots.covariates.adj$v[which(intens.lots.covariates$v < 0.05, arr.ind = TR
 
 # plot parking lots on the geometric network
 pdf(file = "Plots/MelbourneLots.pdf", width = 10, height = 8)
-par(mar=c(0, 1, 2, 1), cex = 1.6)
+par(mar=c(0, 0, 0, 0), cex = 1.6)
 plot(L.lpp, use.marks = FALSE, pch = 16, cols = "red", lwd = 3, legend = FALSE,
-     main = "On-street parking lots in the \n CBD of Melbourne, Australia")
+     main = "")
 dev.off()
 
 # plot intensity of parking lots
 min.intens <- min(intens.lots$v, na.rm = TRUE)
 max.intens <- max(intens.lots$v, na.rm = TRUE)
 pdf(file = "Plots/MelbourneIntensityLots.pdf", width = 10, height = 8)
-par(mar=c(0, 1, 2, 1), cex = 1.6)
+par(mar=c(0, 0, 0, 1), cex = 1.6)
 plot(intens.lots.adj, log = TRUE,
-     main = "Intensity of on-street parking lots in \n the CBD of Melbourne, Australia")
+     main = "")
 dev.off()
 
 pdf(file = "Plots/MelbourneIntensityLotsCovariates.pdf", width = 10, height = 8)
-par(mar=c(0, 1, 2, 1), cex = 1.6)
+par(mar=c(0, 0, 0, 1), cex = 1.6)
 plot(intens.lots.covariates.adj, log = TRUE,
-     main = "Intensity of on-street parking Lots in \n the CBD of Melbourne, Australia")
+     main = "")
 dev.off()
 
 
@@ -129,17 +129,22 @@ g <- ggplot(intens.parking$effects$smooth$t) +
   geom_line(aes(x = x, y = y)) + 
   geom_ribbon(aes(x = x, ymin = lwr, ymax = upr), color = "red") + 
   scale_x_continuous(limits = c(8, 20), breaks = 8:20) +
-  theme_bw()
+  theme_bw() + 
+  labs(x = "Time of the day", y = "s(t)")
 pdf(file = "Plots/Melbourne_smooth_t.pdf", width = 6, height = 4)
 print(g)
 dev.off()
 
 intens.parking.adj <- intens.parking
-intens.parking.adj$v[which(is.na(intens.lots.adj$v) | intens.parking$v < 0.1)] <- NA
+intens.parking.adj$v[which(is.na(intens.lots.adj$v) | intens.parking$v < 0.2)] <- NA
+intens.parking.adj$v <- intens.parking.adj$v/365*4
 plot(intens.parking.adj)
 plot(intens.parking.adj, log = TRUE)
 
 intens.fluctuation <- intens.parking.adj
 intens.fluctuation$v <- intens.fluctuation$v/intens.lots.adj$v
-plot(intens.fluctuation)
-plot(intens.fluctuation, log = TRUE)
+
+pdf("Plots/Melbourne_fluctuation_rate.pdf", width = 10, height = 6)
+par(mar=c(0, 0, 0, 1), cex = 1.6)
+plot(intens.fluctuation, log = TRUE, main = "")
+dev.off()
