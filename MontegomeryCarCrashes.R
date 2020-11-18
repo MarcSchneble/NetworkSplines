@@ -13,22 +13,25 @@ library(lubridate)
 library(readxl)
 library(tidyr)
 library(ggmap)
+library(mgcv)
 
 # load functions
 source(file = "Functions.R")
 register_google("AIzaSyDX0CVJsIDBJF8NVFPAH84oLWPfvPa335Y")
 
-data <- read.csv(file = "Data/CarCrashesMontgomery.csv") %>% as_tibble() %>%
-  mutate(Latitude = as.numeric(substring(sub("\\,.*", "", Location), first = 2)),
-         Longitude = as.numeric(gsub("[)]" ,"" , sub("^\\S+", "", Location))))
+# get data on car crashes
+data <- read.csv(file = "Data/CarCrashesMontgomery_Incidents.csv") %>% as_tibble() %>%
+  mutate(lat = as.numeric(substring(sub("\\,.*", "", Location), first = 2)),
+         lon = as.numeric(gsub("[)]" ,"" , sub("^\\S+", "", Location))),
+         date = as.POSIXct(substring(Crash.Date.Time, 1, 19), format = "%m/%d/%Y %H:%M:%OS", tz = "America/New_York"),
+         date = date + hours(12)*(substring(Crash.Date.Time, 21, 22) == "PM")) %>%
+  filter(year(date) != 2020,
+         Route.Type %in% c("Maryland (State)", "Interstate (State)", "US (State)")) 
 
-data.highways <- filter(data, Route.Type %in% c("Maryland (State)", "Interstate (State)", "US (State)"))
-
-#g <- ggmap(get_map(location = c(-77.1, 39.), zoom = 13, maptype = "roadmap")) +
-#  geom_point(data = data.highways, aes(x = Longitude, y = Latitude))
+# construct geometric network ----
 
 V <- read_excel("Data/VerticesMontgomery.xlsx") %>% filter(!is.na(lat), is.na(remove)) %>%
-  mutate(lat = as.numeric(lat), lon = as.numeric(lon))
+  mutate(lat = as.numeric(lat), lon = as.numeric(lon)) %>% arrange(Id)
 E <- read_excel("Data/EdgesMontgomery.xlsx") %>% filter(!is.na(from))
 
 E$from.lat <- V$lat[match(E$from, V$Id)]
@@ -36,22 +39,10 @@ E$from.lon <- V$lon[match(E$from, V$Id)]
 E$to.lat <- V$lat[match(E$to, V$Id)]
 E$to.lon <- V$lon[match(E$to, V$Id)]
 
-left <- -77.2 
-bottom <- 38.94 
-right <- -77.05 
-top <- 39.04
-
-g <- ggmap(get_map(location = c(left = left, bottom = bottom, right = right, top = top), maptype = "roadmap", scale = 2)) +
-  geom_segment(data = E, aes(x = from.lon, y = from.lat, xend = to.lon, yend = to.lat), size = 1.2)
-
-# spatstat object ----
-
 min.lon <- min(V$lon)
 min.lat <- min(V$lat)
 V$lon <- V$lon - min.lon
 V$lat <- V$lat - min.lat
-
-# create linnet object and rescale with units meters
 
 P <- ppp(x = V$lon, y = V$lat, 
          window = owin(xrange = c(min(V$lon), max(V$lon)), yrange = c(min(V$lat), max(V$lat))))
@@ -59,31 +50,81 @@ L <- linnet(vertices = P, edges = as.matrix(E[, 2:3]))
 s <- L$dpath[191, 193]/2.2
 L <- spatstat::rescale(L, s = s, unitname = "Kilometers")
 
-data.highways <- mutate(data.highways, Longitude = (Longitude - min.lon)/s,
-                             Latitude = (Latitude - min.lat)/s)
-L.ppp <- ppp(x = data.highways$Longitude, y = data.highways$Latitude, L$window)
+data <- data %>%
+  mutate(lon.net = (lon - min.lon)/s, lat.net = (lat - min.lat)/s)
+
+L.ppp <- ppp(x = data$lon.net, y = data$lat.net, L$window, marks = data$Report.Number)
 L.psp <- as.psp(L)
 projection <- project2segment(L.ppp, L.psp)
 
+retain <- which(projection$d < 0.1)
+seg <- projection$mapXY[retain]
+tp <- projection$tp[retain]
+marks <- projection$Xproj$marks[retain]
+L.lpp <- as.lpp(seg = seg, tp = tp, L = L, marks = marks)
 
-# choose accidents which are less than 20 meters away from L
-seg <- projection$mapXY[which(projection$d < 20)]
-tp <- projection$tp[which(projection$d < 20)]
-
-L.lpp <- as.lpp(seg = seg, tp = tp, L = L)
-L <- as.linnet(L.lpp)
-
-W <- owin(xrange = c(9, 18), yrange = c(0, 8), unitname = "Kilometers")
-L <- L[W]
-L.lpp <- L.lpp[W]
+W <- owin(xrange = c(15, 31), yrange = c(0, 12), unitname = "Kilometers")
+L <- L[W, snip = FALSE]
+L$ind.edges <-  which((E$from.lat - min.lat)/s <= 12 & (E$from.lat - min.lat)/s >= 0 &
+                        (E$to.lat - min.lat)/s <= 12 & (E$to.lat - min.lat)/s >= 0 &
+                        (E$from.lon - min.lon)/s <= 31 & (E$from.lon - min.lon)/s >= 15 &
+                        (E$to.lon - min.lon)/s <= 31 & (E$to.lon - min.lon)/s >= 15)
+X <- as.ppp(L.lpp[W, snip = FALSE])
+data <- data %>% mutate(on = factor(1*(Report.Number %in% X$marks)))
 plot(L, box = TRUE)
-plot(L.lpp, box = TRUE)
 
 delta <- 0.05
 h <- 0.025
 r <- 2
 L <- augment.linnet(L, delta, h, r)
-L.lpp <- lpp(as.ppp(L.lpp), L)
+L.lpp <- lpp(X, L)
+plot(unmark(L.lpp))
 
-intens <- intensity.pspline.lpp(L.lpp)
-sigma <- bw.lppl(L.lpp, srange = c(1, 10))
+L.lpp$data$hour <- hour(data %>% filter(on == 1) %>% pull(date))
+type <- rep(NA, sum(L$N.m))
+ind <- 1
+for (m in 1:L$M) {
+  type[ind:(ind + L$N.m[m] - 1)] <- E$type[L$ind.edges[m]]
+  ind <- ind + L$N.m[m]
+}
+L.lpp$domain$routetype <- factor(type, levels = c("state", "interstate", "US"))
+
+
+# intensity fitting ----
+intens <- intensity.pspline.lpp(L.lpp, lins = c("dist2V", "routetype", "x.km")) 
+plot(intens, log = TRUE, box = TRUE)
+plot(intens, style = "width")
+
+# plot smooth effects
+g <- ggplot(intens$effects$smooth$hour) + 
+  geom_ribbon(aes(x = x, ymin = lwr, ymax = upr), fill = "grey50") + 
+  geom_line(aes(x = x, y = y), color = "red") + 
+  theme_bw() + 
+  labs(x = "Time of the day", y = "s(t)")
+pdf(file = "Plots/Melbourne_smooth_t.pdf", width = 6, height = 4)
+print(g)
+dev.off()
+
+sigma <- bw.lppl(L.lpp)
+intens.kernel <- density.lpp(L.lpp, sigma = as.numeric(sigma), dimyx = c(256, 256))
+plot(intens.kernel, log = TRUE)
+
+sigma <- bw.scott(L.lpp)
+intens.kernel2d <- density.lpp(L.lpp, sigma = sigma, distance = "euclidean", dimyx = c(256, 256))
+plot(intens.kernel2d, log = TRUE)
+
+# plot network on map ----
+
+left <- -77.23
+bottom <- 38.94 
+right <- -76.97
+top <- 39.15
+
+g <- ggmap(get_map(location = c(left = left, bottom = bottom, right = right, top = top), maptype = "roadmap", scale = 2)) +
+  geom_segment(data = E, aes(x = from.lon, y = from.lat, xend = to.lon, yend = to.lat), size = 1.2) +
+  geom_point(data = data, aes(x = lon, y = lat, color = on)) + 
+  labs(x = "Longitude", y = "Latitude")
+
+pdf(file = "Plots/MontgomeryNetwork.pdf", height = 8, width = 10)
+print(g)
+dev.off()

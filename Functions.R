@@ -302,9 +302,18 @@ get.design <- function(L.lpp, smooths = NULL, lins = NULL, offset = NULL, m = 10
   if (is.element("xcoord", c(smooths, lins))){
     data$xcoord <- get.x(L)[data$id]
   }
+  if (is.element("x.km", c(smooths, lins))){
+    data$x.km <- get.x.km(L)[data$id]
+  }
+  if (is.element("y.km", c(smooths, lins))){
+    data$y.km <- get.y.km(L)[data$id]
+  }
   if ("dist2Vdiscrete" %in% c(smooths, lins)){
     data$dist2Vdiscrete <- dist2Vdiscrete(L)[data$id]
   }
+  if ("routetype" %in% lins){
+    data$routetype <- L$routetype 
+  } 
   
   # smooth effects
   if (length(smooths) > 0){
@@ -430,13 +439,13 @@ bin.data <- function(L.lpp, L, smooths = NULL, lins = NULL){
   # set factor variable if applicable
   if (length(name) > 0){
     for (a in 1:length(name)) {
-      if (is.factor(covariates %>% pull(sym(name[a])))){
-        data <- mutate(data, !!name[a] := factor(NA, levels = levels(covariates %>% pull(sym(name[a])))))
+      if (is.factor(covariates.comb %>% pull(sym(name[a])))){
+        data <- mutate(data, !!name[a] := factor(NA, levels = levels(covariates.comb %>% pull(sym(name[a])))))
       }
-      if (is.double(covariates %>% pull(sym(name[a])))){
+      if (is.double(covariates.comb %>% pull(sym(name[a])))){
         data <- mutate(data, !!name[a] := as.double(NA))
       } 
-      if (is.integer(covariates %>% pull(sym(name[a])))){
+      if (is.integer(covariates.comb %>% pull(sym(name[a])))){
         data <- mutate(data, !!name[a] := as.integer(NA))
       } 
     }
@@ -503,6 +512,25 @@ get.x <- function(L){
   return(x)
 }
 
+get.x.km <- function(L){
+  x <- rep(NA, sum(L$N.m))
+  ind <- 1
+  for (m in 1:L$M) {
+    x[ind:(ind + L$N.m[m] - 1)] <- as.lpp(seg = m, tp = L$z[[m]]/L$d[m], L = L)$data$x
+    ind <- ind + L$N.m[m]
+  }
+  return(x)
+}
+get.y.km <- function(L){
+  x <- rep(NA, sum(L$N.m))
+  ind <- 1
+  for (m in 1:L$M) {
+    x[ind:(ind + L$N.m[m] - 1)] <- as.lpp(seg = m, tp = L$z[[m]]/L$d[m], L = L)$data$y
+    ind <- ind + L$N.m[m]
+  }
+  return(x)
+}
+
 dist2Vdiscrete <- function(L, threshold = 25){
   d <- rep(NA, sum(L$N.m))
   ind <- 1
@@ -511,6 +539,10 @@ dist2Vdiscrete <- function(L, threshold = 25){
     ind <- ind + L$N.m[m]
   }
   return(d)
+}
+
+get.routetype <- function(L, data){
+
 }
 
 get.offset <- function(offset, L){
@@ -720,7 +752,11 @@ intensity.pspline.lpp = function(L.lpp, smooths = NULL, lins = NULL, offset = NU
 simulation.chicago <- function(s, delta, h, r, n, varphi, kernel = FALSE, kernel2d = FALSE) {
   
   # simulate n points with intensity f
-  L.lpp <- rlpp(n = n, f = intens.kernel)
+  L.lpp <- rlpp(n = n, f = varphi)
+  
+  # scale varphi for computation of ISE
+  varphi <- varphi/integral.linim(varphi)*n
+  print(integral.linfun(varphi))
   
   # compute estimates and ISE
   intens.pspline <- intensity.pspline.lpp(L.lpp)
