@@ -50,14 +50,14 @@ data.lots <- readRDS("Data/Parking_Lots.rds") %>% filter(sensor == 1) %>%
   select(lon, lat, StreetMarker) %>%
   mutate(lon = (lon - min.lon)/s, lat = (lat - min.lat)/s)
 data.parking <- left_join(data.parking, data.lots, by = "StreetMarker") %>% 
-  filter(h.start >= 8, h.start < 20, State == 1) %>%
+  filter(h.start >= 8, h.start < 20, State == 1, month(ArrivalTime) %in% c(6, 7, 8)) %>%
   mutate(t = 0.25*floor(m.start/15),
          weekday2 = factor(weekday, levels = c("weekday", "Sat", "Sun"))) %>%
   replace_na(replace = list(weekday2 = "weekday"))
 
 # remove parking lots with too few events
 freq <- as.data.frame(table(data.parking$StreetMarker))
-lots.retain <- filter(freq, Freq >= 1000) %>% pull(Var1) 
+lots.retain <- filter(freq, Freq >= 2*92) %>% pull(Var1) 
 data.parking <- filter(data.parking, StreetMarker %in% lots.retain)
 data.parking$StreetMarker <- factor(data.parking$StreetMarker, levels = unique(data.parking$StreetMarker))
 data.lots <- filter(data.lots, StreetMarker %in% data.parking$StreetMarker)
@@ -114,20 +114,20 @@ dev.off()
 
 # only consider parking lots which are located on the map
 data.CBD <- filter(data.parking, data.parking$StreetMarker %in% L.lpp$data$marks)
-covariates <- select(data.CBD, t, weekday2)
+covariates <- select(data.CBD, t, weekday)
 
 # observed processes
 L.lpp.parking <- as.lpp(x = data.CBD$lon, y = data.CBD$lat, L = L)
 L.lpp.parking$data$t <- covariates$t
-L.lpp.parking$data$weekday <- covariates$weekday2
+L.lpp.parking$data$weekday <- covariates$weekday
 
 # fitting
-intens.parking <- intensity.pspline.lpp(L.lpp.parking, lins = "weekday", smooths = "t", eps.rho = 1e-3)
+intens.parking <- intensity.pspline.lpp(L.lpp.parking, smooths = "t")
 
 # plot smooth effects
 g <- ggplot(intens.parking$effects$smooth$t) + 
-  geom_line(aes(x = x, y = y)) + 
-  geom_ribbon(aes(x = x, ymin = lwr, ymax = upr), color = "red") + 
+  geom_ribbon(aes(x = x, ymin = lwr, ymax = upr), color = "grey80") + 
+  geom_line(aes(x = x, y = y), color = "red") + 
   scale_x_continuous(limits = c(8, 20), breaks = 8:20) +
   theme_bw() + 
   labs(x = "Time of the day", y = "s(t)")

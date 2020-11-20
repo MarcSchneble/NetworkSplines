@@ -312,7 +312,10 @@ get.design <- function(L.lpp, smooths = NULL, lins = NULL, offset = NULL, m = 10
     data$dist2Vdiscrete <- dist2Vdiscrete(L)[data$id]
   }
   if ("routetype" %in% lins){
-    data$routetype <- L$routetype 
+    data$routetype <- L$routetype[data$id]
+  } 
+  if ("direction" %in% lins){
+    data$direction <- L$direction[data$id]
   } 
   
   # smooth effects
@@ -613,8 +616,11 @@ fit.lpp = function(L.lpp, smooths = NULL, lins = NULL, offset = NULL,
   if (length(lins) > 0) {
     effects$linear <- tibble(name = tail(design$names.theta, length(design$ind.lins)), estimate = NA, se = NA)
     for (i in 1:length(design$ind.lins)) {
-      effects$linear$estimate[i] <- theta[design$ind.lins[i]]
-      effects$linear$se[i] <- sqrt(V[design$ind.lins[i], design$ind.lins[i]])
+      effects$linear$estimate[i] <- round(theta[design$ind.lins[i]], 3)
+      effects$linear$se[i] <- round(sqrt(V[design$ind.lins[i], design$ind.lins[i]]), 3)
+      effects$linear$rr[i] <- round(exp(effects$linear$estimate[i]), 2)
+      effects$linear$rr.lower[i] <- round(exp(effects$linear$estimate[i] - 1.96*effects$linear$se[i]), 2)
+      effects$linear$rr.upper[i] <- round(exp(effects$linear$estimate[i] + 1.96*effects$linear$se[i]), 2)
     }
   } 
 

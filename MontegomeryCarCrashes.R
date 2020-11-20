@@ -26,7 +26,8 @@ data <- read.csv(file = "Data/CarCrashesMontgomery_Incidents.csv") %>% as_tibble
          date = as.POSIXct(substring(Crash.Date.Time, 1, 19), format = "%m/%d/%Y %H:%M:%OS", tz = "America/New_York"),
          date = date + hours(12)*(substring(Crash.Date.Time, 21, 22) == "PM")) %>%
   filter(year(date) != 2020,
-         Route.Type %in% c("Maryland (State)", "Interstate (State)", "US (State)")) 
+         Route.Type %in% c("Maryland (State)", "Interstate (State)", "US (State)"),
+         hour(date) >= 6, hour(date) <= 21) 
 
 # construct geometric network ----
 
@@ -63,12 +64,12 @@ tp <- projection$tp[retain]
 marks <- projection$Xproj$marks[retain]
 L.lpp <- as.lpp(seg = seg, tp = tp, L = L, marks = marks)
 
-W <- owin(xrange = c(15, 31), yrange = c(0, 12), unitname = "Kilometers")
+W <- owin(xrange = c(15, 33), yrange = c(0, 12), unitname = "Kilometers")
 L <- L[W, snip = FALSE]
 L$ind.edges <-  which((E$from.lat - min.lat)/s <= 12 & (E$from.lat - min.lat)/s >= 0 &
                         (E$to.lat - min.lat)/s <= 12 & (E$to.lat - min.lat)/s >= 0 &
-                        (E$from.lon - min.lon)/s <= 31 & (E$from.lon - min.lon)/s >= 15 &
-                        (E$to.lon - min.lon)/s <= 31 & (E$to.lon - min.lon)/s >= 15)
+                        (E$from.lon - min.lon)/s <= 33 & (E$from.lon - min.lon)/s >= 15 &
+                        (E$to.lon - min.lon)/s <= 33 & (E$to.lon - min.lon)/s >= 15)
 X <- as.ppp(L.lpp[W, snip = FALSE])
 data <- data %>% mutate(on = factor(1*(Report.Number %in% X$marks)))
 plot(L, box = TRUE)
@@ -80,28 +81,45 @@ L <- augment.linnet(L, delta, h, r)
 L.lpp <- lpp(X, L)
 plot(unmark(L.lpp))
 
-L.lpp$data$hour <- hour(data %>% filter(on == 1) %>% pull(date))
-type <- rep(NA, sum(L$N.m))
+L.lpp$data$hour <- hour(data %>% filter(on == 1) %>% pull(date)) + floor(minute(data %>% filter(on == 1) %>% pull(date))/15)/4
+type <- direction <- rep(NA, sum(L$N.m))
 ind <- 1
 for (m in 1:L$M) {
   type[ind:(ind + L$N.m[m] - 1)] <- E$type[L$ind.edges[m]]
+  direction[ind:(ind + L$N.m[m] - 1)] <- E$direction[L$ind.edges[m]]
   ind <- ind + L$N.m[m]
 }
 L.lpp$domain$routetype <- factor(type, levels = c("state", "interstate", "US"))
+L.lpp$domain$direction <- factor(direction, levels = c("SN", "EW", "SENW", "SWNE"))
 
 
 # intensity fitting ----
-intens <- intensity.pspline.lpp(L.lpp, lins = c("dist2V", "routetype", "x.km")) 
-plot(intens, log = TRUE, box = TRUE)
+intens <- intensity.pspline.lpp(L.lpp) 
+intens.covariates <- intensity.pspline.lpp(L.lpp, lins = c("routetype", "direction", "dist2V"), smooths = "hour") 
+plot(intens, log = TRUE)
+plot(intens, log = TRUE)
 plot(intens, style = "width")
 
+# plot intensity without and with covariates
+pdf(file = "Plots/Montgomery_intensity.pdf", width = 10, height = 6)
+par(mar=c(0, 0, 0, 1), cex = 1.6)
+plot(intens/4, log = TRUE, main = "")
+dev.off()
+
+pdf(file = "Plots/Montgomery_intensity_covariates.pdf", width = 10, height = 6)
+par(mar=c(0, 0, 0, 1), cex = 1.6)
+plot(intens.covariates, log = TRUE, main = "")
+dev.off()
+
 # plot smooth effects
-g <- ggplot(intens$effects$smooth$hour) + 
-  geom_ribbon(aes(x = x, ymin = lwr, ymax = upr), fill = "grey50") + 
-  geom_line(aes(x = x, y = y), color = "red") + 
+g <- ggplot(intens.covariates$effects$smooth$hour) + 
+  geom_ribbon(aes(x = x, ymin = exp(lwr), ymax = exp(upr)), fill = "grey50") + 
+  geom_line(aes(x = x, y = exp(y)), color = "red") + 
   theme_bw() + 
-  labs(x = "Time of the day", y = "s(t)")
-pdf(file = "Plots/Melbourne_smooth_t.pdf", width = 6, height = 4)
+  labs(x = "Hour of the day", y = "exp(s(t))") + 
+  scale_x_continuous(breaks = seq(6, 22, 2)) + 
+  scale_y_continuous(breaks = seq(0.4, 1.6, 0.2))
+pdf(file = "Plots/Montgomery_smooth_t.pdf", width = 6, height = 4)
 print(g)
 dev.off()
 
@@ -117,12 +135,17 @@ plot(intens.kernel2d, log = TRUE)
 
 left <- -77.23
 bottom <- 38.94 
-right <- -76.97
-top <- 39.15
+right <- -76.95
+top <- 39.13
 
 g <- ggmap(get_map(location = c(left = left, bottom = bottom, right = right, top = top), maptype = "roadmap", scale = 2)) +
   geom_segment(data = E, aes(x = from.lon, y = from.lat, xend = to.lon, yend = to.lat), size = 1.2) +
   geom_point(data = data, aes(x = lon, y = lat, color = on)) + 
+  labs(x = "Longitude", y = "Latitude")
+
+g <- ggmap(get_map(location = c(left = left, bottom = bottom, right = right, top = top), maptype = "roadmap", scale = 2)) +
+  geom_segment(data = E %>% slice(L$ind.edges), aes(x = from.lon, y = from.lat, xend = to.lon, yend = to.lat), size = 1.5) +
+  geom_point(data = data %>% filter(on == 1), aes(x = lon, y = lat), col = "red", alpha = 0.1) + 
   labs(x = "Longitude", y = "Latitude")
 
 pdf(file = "Plots/MontgomeryNetwork.pdf", height = 8, width = 10)
