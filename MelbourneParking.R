@@ -39,8 +39,8 @@ s <- L$dpath[12, 94]/1900
 L <- spatstat::rescale(L, s = s, unitname = "Meters")
 
 # choose parameters and augment L
-delta <- 25
-h <- 5
+delta <- 10
+h <- 2
 r <- 2
 L <- augment.linnet(L, delta, h, r)
 
@@ -84,8 +84,8 @@ intens.lots.covariates <- intensity.pspline.lpp(L.lpp, lins = "dist2Vdiscrete")
 # only where intensity is at least 0.1
 intens.lots.adj <- intens.lots
 intens.lots.covariates.adj <- intens.lots.covariates
-intens.lots.adj$v[which(intens.lots$v < 0.05, arr.ind = TRUE)] = NA
-intens.lots.covariates.adj$v[which(intens.lots.covariates$v < 0.05, arr.ind = TRUE)] = NA
+intens.lots.adj$v[which(intens.lots$v < 0.1, arr.ind = TRUE)] = NA
+intens.lots.covariates.adj$v[which(intens.lots.covariates$v < 0.1, arr.ind = TRUE)] = NA
 
 # plot parking lots on the geometric network
 pdf(file = "Plots/MelbourneLots.pdf", width = 10, height = 8)
@@ -122,10 +122,11 @@ L.lpp.parking$data$t <- covariates$t
 L.lpp.parking$data$weekday <- covariates$weekday
 
 # fitting
-intens.parking <- intensity.pspline.lpp(L.lpp.parking, smooths = "t")
+intens.parking <- intensity.pspline.lpp(L.lpp.parking)
+intens.parking.covariates <- intensity.pspline.lpp(L.lpp.parking, smooths = "t")
 
 # plot smooth effects
-g <- ggplot(intens.parking$effects$smooth$t) + 
+g <- ggplot(intens.parking.covariates$effects$smooth$t) + 
   geom_ribbon(aes(x = x, ymin = lwr, ymax = upr), color = "grey80") + 
   geom_line(aes(x = x, y = y), color = "red") + 
   scale_x_continuous(limits = c(8, 20), breaks = 8:20) +
@@ -135,9 +136,9 @@ pdf(file = "Plots/Melbourne_smooth_t.pdf", width = 6, height = 4)
 print(g)
 dev.off()
 
-intens.parking.adj <- intens.parking
-intens.parking.adj$v[which(is.na(intens.lots.adj$v) | intens.parking$v < 0.2)] <- NA
-intens.parking.adj$v <- intens.parking.adj$v/365*4
+intens.parking.adj <- intens.parking.covariates
+intens.parking.adj$v[which(is.na(intens.lots.adj$v) | intens.parking$v < 10)] <- NA
+intens.parking.adj$v <- intens.parking.adj$v/92*4
 plot(intens.parking.adj)
 plot(intens.parking.adj, log = TRUE)
 

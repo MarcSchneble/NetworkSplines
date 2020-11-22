@@ -534,7 +534,7 @@ get.y.km <- function(L){
   return(x)
 }
 
-dist2Vdiscrete <- function(L, threshold = 25){
+dist2Vdiscrete <- function(L, threshold = 10){
   d <- rep(NA, sum(L$N.m))
   ind <- 1
   for (m in 1:L$M) {
