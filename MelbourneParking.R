@@ -145,7 +145,12 @@ plot(intens.parking.adj, log = TRUE)
 intens.fluctuation <- intens.parking.adj
 intens.fluctuation$v <- intens.fluctuation$v/intens.lots.adj$v
 
+ind <- which(intens.fluctuation$v > 5, arr.ind = TRUE)
+y.coord <- intens.fluctuation$yrow[ind[, 1]]
+x.coord <- intens.fluctuation$xcol[ind[, 2]]
+
 pdf("Plots/Melbourne_fluctuation_rate.pdf", width = 10, height = 6)
 par(mar=c(0, 0, 0, 1), cex = 1.6)
 plot(intens.fluctuation, log = TRUE, main = "")
+points(x.coord, y.coord, pch = 21, col = "grey80", cex = 2)
 dev.off()

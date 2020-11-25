@@ -11,18 +11,18 @@ library(dplyr)
 library(tidyr)
 library(parallel)
 library(ggplot2)
-library(scales)
-
+library(gridExtra)
 
 # load functions
 source("Functions.R")
 
-simulation.intensity.kernel <- TRUE
-simulation.intensity.edges <- TRUE
-simulation.internal <- FALSE
+simulation.intensity.kernel <- FALSE
+simulation.intensity.edges <- FALSE
+simulation.intensity.delta.h <- FALSE
+simulation.internal <- TRUE
 simulation.external <- FALSE
 
-if (simulation.intensity.kernel | simulation.external){
+if (simulation.intensity.kernel | simulation.external | simulation.intensity.delta.h){
   # augmented Chicago network
   delta <- 10
   h <- 2
@@ -38,35 +38,39 @@ if (simulation.intensity.kernel | simulation.external){
   sigma <- bw.lppl(L.lpp, sigma = seq(50, 200, 0.1))
   intens.kernel <- density.lpp(L.lpp, sigma = as.numeric(sigma), dimyx = c(256, 256))
   
+  # intensity estimate with two-dimensional kernel
+  sigma <- bw.scott(L.lpp)
+  intens.kernel2d <- density.lpp(L.lpp, sigma = sigma, distance = "euclidean", dimyx = c(256, 256))
+  
   # intensity with Voronoi estimate
-  set.seed(1)
-  f <- bw.voronoi(chicago)
-  intens.voronoi <- densityVoronoi(chicago, f = as.numeric(f), nrep = 100, dimyx = c(256, 256))
+  #set.seed(1)
+  #f <- bw.voronoi(chicago)
+  #intens.voronoi <- densityVoronoi(chicago, f = as.numeric(f), nrep = 100, dimyx = c(256, 256))
   
   # plots
   pdf(file = "Plots/ChicagoNetwork.pdf", width = 10, height = 8)
-  par(mar=c(0, 0, 2, 0), cex = 1.6)
-  plot(L.lpp, main = "Chicago Crime Network", lwd = 3, leg.side = "right",
-       cols = hue_pal()(7), chars = 0:6, size = 1)
+  par(mar=c(0, 0, 0, 0), cex = 1.6)
+  plot(L.lpp, main = "", lwd = 3, leg.side = "right",
+       cols = scales::hue_pal()(7), chars = 0:6, size = 1)
   dev.off()
   
   max.intens <- max(intens.pspline$v, intens.kernel$v, na.rm = TRUE)
   
   pdf(file = "Plots/ChicagoIntensityPSpline.pdf", width = 10, height = 8)
-  par(mar=c(0, 0, 3, 0.5), cex = 1.6)
-  plot.linim(intens.pspline, main = "Penalized Spline Estimate" , zlim = c(0, max.intens))
+  par(mar=c(0, 0, 0, 1), cex = 1.6)
+  plot.linim(intens.pspline, main = "" , zlim = c(0, max.intens))
   points(X)
   dev.off()
   
   pdf(file = "Plots/ChicagoIntensityKernel.pdf", width = 10, height = 8)
-  par(mar=c(0, 0, 3, 0.5), cex = 1.6)
-  plot.linim(intens.kernel, main = "Kernel Based Estimate", zlim = c(0, max.intens)) 
+  par(mar=c(0, 0, 0, 1), cex = 1.6)
+  plot.linim(intens.kernel, main = "", zlim = c(0, max.intens)) 
   points(X)
   dev.off()
   
-  pdf(file = "Plots/ChicagoIntensityVoronoi.pdf", width = 10, height = 8)
-  par(mar=c(0, 0, 3, 0.5), cex = 1.6)
-  plot.linim(intens.voronoi, main = "Smoothed Voronoi Estimate") 
+  pdf(file = "Plots/ChicagoIntensityKernel2d.pdf", width = 10, height = 8)
+  par(mar=c(0, 0, 0, 1), cex = 1.6)
+  plot.linim(intens.kernel2d, main = "") 
   points(X)
   dev.off()
   
@@ -78,20 +82,18 @@ if (simulation.intensity.kernel | simulation.external){
   
   df <- tibble(nr = c(seq(1, 11, 2), seq(2, 12, 2)),
                beta = c(tail(fit.marks.pspline$theta.hat, 6), fit.marks.poisson$fit$coef[2:7]),
-               se = c(tail(fit.marks.pspline$se.hat, 6), sqrt(diag(vcov(fit.marks.poisson$fit$internal$glmfit)))[2:7]/sqrt(phi)),
+               se = c(tail(fit.marks.pspline$effects$linear$se, 6), sqrt(diag(vcov(fit.marks.poisson$fit$internal$glmfit)))[2:7]/sqrt(phi)),
                lower = beta - 1.96*se, upper = beta + 1.96*se,
-               kind = factor(c(rep("pspline", 6), rep("poisson", 6)), levels = c("pspline", "poisson")),
-               name = rep(c("burglary", "cartheft", "damage", "robbery", "theft", "trespass"), 2)) 
+               kind = factor(c(rep("pspline", 6), rep("poisson", 6)), levels = c("pspline", "poisson"))) 
   
-  g <- ggplot(df) + geom_point(aes(x = nr, y = beta, color = kind, shape = kind)) + 
-    geom_errorbar(aes(x = nr, ymin = lower, ymax = upper, color = kind), width = 0.7, alpha = 0.7, show.legend = FALSE) + 
+  g <- ggplot(df) + geom_point(aes(x = nr, y = beta, color = kind)) + 
+    geom_errorbar(aes(x = nr, ymin = lower, ymax = upper, color = kind), width = 0.7, alpha = 0.7) + 
     theme_bw() + 
-    scale_color_hue(name = "Model", labels = c("Penalized spline", "Poisson process")) +
-    scale_shape_manual(name = "Model", labels = c("Penalized spline", "Poisson process"), values = c(16, 17)) +
+    scale_color_hue(labels = c("penalized spline based", "Poisson process")) +
     theme(legend.justification = c(0.01, 0.99), legend.position = c(0.01, 0.995), 
           panel.grid.major.x = element_blank(), panel.grid.minor.x = element_blank()) + 
-    labs(x = "Kind of crime", y = "Effect size on the log-scale") + 
-    scale_x_continuous(breaks = seq(1.5, 11.5, 2), labels = c("burglary", "cartheft", "damage", "robbery", "theft", "trespass")) + 
+    labs(color = "Estimate", x = "Kind of crime", y = "Effect size on the log-scale and confidence interval") + 
+    scale_x_continuous(breaks = seq(1.5, 11.5, 2), labels = c("Burglary", "Cartheft", "Damage", "Robbery", "Theft", "Trespass")) + 
     scale_y_continuous(breaks = seq(-2.5, 1, 0.5)) 
   
   pdf(file = "Plots/ChicagoEffects.pdf", height = 4, width = 6)
@@ -109,18 +111,19 @@ if (simulation.intensity.kernel){
   delta <- 10
   h <- 2
   r <- 2
-  varphi <- as.linfun(intens.kernel)
-  n <- c(50, 75, 100, 150, 200, 500, 1000)
+  varphi <- intens.kernel
+  n <- c(100, 200, 500, 1000)
+  
+  #(test <- simulation.chicago(1, delta, h, r, 1000, varphi, kernel = TRUE, kernel2d = TRUE))
   
   df.pspline <- tibble(n = as.factor(rep(n, each = R)), ISE = NA, kind = "pspline")
   df.kernel <- tibble(n = as.factor(rep(n, each = R)), ISE = NA, kind = "kernel")
-  df.voronoi <- tibble(n = as.factor(rep(n, each = R)), ISE = NA, kind = "voronoi")
+  df.kernel2d <- tibble(n = as.factor(rep(n, each = R)), ISE = NA, kind = "kernel2d")
   
   for (i in 1:length(n)) {
     
-    no_cores <- detectCores() - 2
+    no_cores <- min(detectCores() - 2, 20)
     set.seed(1)
-    
     
     cl <- makeCluster(no_cores)
     clusterExport(cl, ls())
@@ -134,21 +137,24 @@ if (simulation.intensity.kernel){
     clusterEvalQ(cl, library(tidyr))
     
     message(n[i])
-    ISE <- parLapply(cl, 1:R, simulation.chicago, delta = delta, h = h, r = r, n = n[i], varphi = varphi, kernel = TRUE, voronoi = TRUE)
+    ISE <- parLapply(cl, 1:R, simulation.chicago, delta = delta, h = h, r = r, n = n[i], varphi = varphi, kernel = TRUE, kernel2d = TRUE)
     stopCluster(cl) 
     
     df.pspline$ISE[which(df.pspline$n == n[i])] <- unlist(ISE)[which(names(unlist(ISE)) == "ISE.pspline")]
     df.kernel$ISE[which(df.kernel$n == n[i])] <- unlist(ISE)[which(names(unlist(ISE)) == "ISE.kernel")] 
-    df.voronoi$ISE[which(df.voronoi$n == n[i])] <- unlist(ISE)[which(names(unlist(ISE)) == "ISE.voronoi")]
+    df.kernel2d$ISE[which(df.kernel2d$n == n[i])] <- unlist(ISE)[which(names(unlist(ISE)) == "ISE.kernel2d")]
   }
   
-  df <- bind_rows(df.pspline, df.kernel, df.voronoi) %>% mutate(kind = factor(kind, levels = c("pspline", "kernel", "voronoi")))
-  g <- ggplot(df, aes(x = n, y = ISE)) + 
+  df <- bind_rows(df.pspline, df.kernel, df.kernel2d) %>% 
+    mutate(kind = factor(kind, levels = c("pspline", "kernel", "kernel2d")))
+  saveRDS(df, file = "df_simulation_intensity_n.rds")
+  g <- ggplot(df %>% mutate(ISE = 10000*ISE), aes(x = n, y = ISE)) + 
     geom_boxplot(aes(color = kind)) + 
     theme_bw() + 
-    theme(legend.justification = c(0.99, 0.99), legend.position = c(0.99, 0.995)) + 
+    theme(legend.justification = c(0.01, 0.99), legend.position = c(0.01, 0.995)) + 
     labs(color = "Estimate") + 
-    scale_color_hue(labels = c("Penalized Spline", "Kernel Based", "Smoothed Voronoi"))
+    scale_y_continuous(limits = c(0, 0.5)) + 
+    scale_color_hue(labels = c("penalized spline based estimate", "kernel estimate based on shortest path distance", "kernel estimate based on Euclidean distance"))
   
   pdf(file = "Plots/simulation_n.pdf", height = 6, width = 6)
   print(g)
@@ -163,21 +169,24 @@ if (simulation.intensity.edges){
   delta <- 10
   h <- 2
   r <- 2
+  L <- augment.linnet(as.linnet(chicago), delta, h, r)
+  n <- c(100, 200, 500, 1000)
+  
   H <- function(x, y, seg, tp){
     1*(seg %% 10 == 0)
   }
-  varphi <- linfun(H, L)
-  n <- c(50, 75, 100, 150, 200, 500, 1000)
+  varphi <- as.linim(linfun(H, L), dimyx = c(256, 256))
+  varphi <- varphi/integral.linim(varphi)
+  
   
   df.pspline <- tibble(n = as.factor(rep(n, each = R)), ISE = NA, kind = "pspline")
   df.kernel <- tibble(n = as.factor(rep(n, each = R)), ISE = NA, kind = "kernel")
-  df.voronoi <- tibble(n = as.factor(rep(n, each = R)), ISE = NA, kind = "voronoi")
+  df.kernel2d <- tibble(n = as.factor(rep(n, each = R)), ISE = NA, kind = "kernel2d")
   
   for (i in 1:length(n)) {
     
-    no_cores <- detectCores() - 2
+    no_cores <- min(detectCores() - 2, 20)
     set.seed(1)
-    
     
     cl <- makeCluster(no_cores)
     clusterExport(cl, ls())
@@ -191,26 +200,82 @@ if (simulation.intensity.edges){
     clusterEvalQ(cl, library(tidyr))
     
     message(n[i])
-    ISE <- parLapply(cl, 1:R, simulation.chicago, delta = delta, h = h, r = r, n = n[i], varphi = varphi, kernel = TRUE, voronoi = TRUE)
+    ISE <- parLapply(cl, 1:R, simulation.chicago, delta = delta, h = h, r = r, n = n[i], varphi = varphi, kernel = TRUE, kernel2d = TRUE)
     stopCluster(cl) 
     
     df.pspline$ISE[which(df.pspline$n == n[i])] <- unlist(ISE)[which(names(unlist(ISE)) == "ISE.pspline")]
     df.kernel$ISE[which(df.kernel$n == n[i])] <- unlist(ISE)[which(names(unlist(ISE)) == "ISE.kernel")] 
-    df.voronoi$ISE[which(df.voronoi$n == n[i])] <- unlist(ISE)[which(names(unlist(ISE)) == "ISE.voronoi")]
+    df.kernel2d$ISE[which(df.kernel2d$n == n[i])] <- unlist(ISE)[which(names(unlist(ISE)) == "ISE.kernel2d")]
   }
   
-  df <- bind_rows(df.pspline, df.kernel, df.voronoi) %>% mutate(kind = factor(kind, levels = c("pspline", "kernel", "voronoi")))
-  g <- ggplot(df, aes(x = n, y = ISE)) + 
+  df <- bind_rows(df.pspline, df.kernel, df.kernel2d) %>% 
+    mutate(kind = factor(kind, levels = c("pspline", "kernel", "kernel2d")))
+  saveRDS(df, file = "df_simulation_intensity_edges_n.rds")
+  g <- ggplot(df %>% mutate(ISE = 10000*ISE), aes(x = n, y = ISE)) + 
     geom_boxplot(aes(color = kind)) + 
     theme_bw() + 
-    theme(legend.justification = c(0.99, 0.99), legend.position = c(0.99, 0.995)) + 
+    theme(legend.justification = c(0.01, 0.99), legend.position = c(0.01, 0.995)) + 
     labs(color = "Estimate") + 
-    scale_color_hue(labels = c("Penalized Spline", "Kernel Based", "Smoothed Voronoi"))
+    scale_y_continuous(limits = c(0, 5)) + 
+    scale_color_hue(labels = c("penalized spline based estimate", "kernel estimate based on shortest path distance", "kernel estimate based on Euclidean distance"))
   
-  pdf(file = "Plots/simulation_n.pdf", height = 6, width = 6)
+  pdf(file = "Plots/simulation_edges_n.pdf", height = 6, width = 6)
   print(g)
   dev.off()
 }
+
+if (simulation.intensity.delta.h) {
+  R <- 100
+  delta <- c(5, 10, 20, 50)
+  r <- 2
+  varphi <- intens.kernel
+  n <- 200
+  
+  df <- tibble(delta = rep(delta, each = 3*R), h = delta/rep(rep(c(2, 5, 10), each = R), 3), ISE = NA)
+  
+  for (i in 1:length(delta)) {
+    for (j in c(2, 5, 10)) {
+      h <<- delta[i]/j
+      
+      no_cores <- min(detectCores() - 2, 20)
+      set.seed(1)
+      
+      cl <- makeCluster(no_cores)
+      clusterExport(cl, ls())
+      
+      clusterEvalQ(cl, library(spatstat)) 
+      clusterEvalQ(cl, library(igraph))
+      clusterEvalQ(cl, library(Matrix))   
+      clusterEvalQ(cl, library(MASS))   
+      clusterEvalQ(cl, library(splines)) 
+      clusterEvalQ(cl, library(dplyr))
+      clusterEvalQ(cl, library(tidyr))
+      
+      message(c(delta[i], h))
+      ISE <- parLapply(cl, 1:R, simulation.chicago, delta = delta[i], h = h, r = r, n = n, varphi = varphi)
+      stopCluster(cl) 
+      
+      df$ISE[which(df$delta == delta[i] & df$h == h)] <- unlist(ISE)
+    }
+  }
+  saveRDS(df, "df_simulation_delta_h.rds")
+  df <- mutate(df, h = factor(h), delta = factor(delta))
+  g <- list()
+  d <- delta
+  for (i in 1:length(delta)) {
+    g[[i]] <- ggplot(df %>% mutate(ISE = ISE*10000) %>% filter(delta == d[i]), aes(x = h, y = ISE)) + 
+      geom_boxplot(aes(color = h)) + 
+      theme_bw() + 
+      theme(legend.direction = "horizontal",
+            legend.justification = c(0.01, 0.99), legend.position = c(0.01, 0.995)) +
+      scale_y_continuous(limits = c(0, 0.5))
+    labs(color = "Global bin width h")
+    pdf(file = paste0("Plots/simulation_delta_", d[i], ".pdf"), height = 4, width = 4)
+    print(g[[i]])
+    dev.off()
+  }
+}
+
 
 
 # simulation with network dependend covariates ----
@@ -226,16 +291,18 @@ if (simulation.internal){
     exp(2*tp + x/1000)
   }
   varphi <- linfun(H, L)
-  n <- c(50, 75, 100, 150, 200, 500, 1000)
+  n <- c(100, 200, 500, 1000)
+  start <- Sys.time()
+  test <- simulation.chicago.covariates.internal(1, delta, h, r, 200, varphi)
+  print(Sys.time() - start)
   
   df.tp <- tibble(n = as.factor(rep(n, each = R)), beta = NA, kind = "tp")
   df.x <- tibble(n = as.factor(rep(n, each = R)), beta = NA, kind = "x")
   
   for (i in 1:length(n)) {
     
-    no_cores <- min(detectCores() - 2, 10)
+    no_cores <- min(detectCores() - 2, 20)
     set.seed(1)
-    
     
     cl <- makeCluster(no_cores)
     clusterExport(cl, ls())
@@ -250,6 +317,7 @@ if (simulation.internal){
     
     message(n[i])
     fit <- parLapply(cl, 1:R, simulation.chicago.covariates.internal, delta = delta, h = h, r = r, n = n[i], varphi = varphi)
+    print(fit)
     stopCluster(cl) 
     
     df.tp$beta[which(df.tp$n == n[i])] <- unlist(fit)[which(names(unlist(fit)) == "beta1")]
@@ -258,14 +326,17 @@ if (simulation.internal){
   
   df <- bind_rows(df.tp, df.x) %>% mutate(kind = factor(kind, levels = c("tp", "x")))
   saveRDS(df, file = "df_simulation_internal.rds")
-  g <- ggplot(df, aes(x = n, y = beta)) + 
+  df <- df[-which(df$beta < 0), ]
+  g <- ggplot(df %>% filter(n %in% c(100, 200, 500, 1000)), aes(x = n, y = beta)) + 
     geom_boxplot(aes(color = kind)) + 
     theme_bw() + 
-    theme(legend.justification = c(0.99, 0.99), legend.position = c(0.99, 0.995)) + 
-    labs(color = "Model") + 
-    scale_color_hue(labels = c("Relative position on the edge", "x-coordinate"))
+    theme(legend.justification = c(0.99, 0.99), legend.position = c(0.99, 0.995),
+          legend.direction = "horizontal") + 
+    labs(color = "Effect", y = expression(paste(hat(beta)))) + 
+    scale_color_hue(labels = c("Relative position on the edge", "x-coordinate")) + 
+    scale_y_continuous(limits = c(0, 3), breaks = seq(0, 3, 0.5))
   
-  pdf(file = "Plots/simulation_internal.pdf", height = 6, width = 6)
+  pdf(file = "Plots/simulation_internal.pdf", height = 4, width = 6)
   print(g)
   dev.off()
 }
@@ -279,15 +350,68 @@ if (simulation.internal){
 
 if (simulation.external){
   
+  R <- 100
   delta <- 10
   h <- 5
   r <- 2
   L <- augment.linnet(as.linnet(chicago), delta, h, r)
-  beta <- c(2, 1, -1)
-  varphi <- as.linfun(intens.pspline)
+  beta <- list(
+    c(2, 1, -1),
+    c(1, -1, 1),
+    c(1, 0, -1),
+    c(4, 1, 1)
+  )
+  varphi <- as.linfun(intens.kernel)
   
-  a <- simulation.chicago.covariates.external(1, delta, h, r, beta, varphi)
+  df.t <- tibble(i = rep(as.factor(1:4), each = R), beta = NA, kind = "t")
+  df.type <- tibble(i = rep(as.factor(1:4), each = R), beta = NA, kind = "type")
   
+  for (i in 1:length(beta)) {
+    
+    no_cores <- min(detectCores() - 2, 20)
+    #detectCores() - 2
+    set.seed(1)
+    
+    cl <- makeCluster(no_cores)
+    clusterExport(cl, ls())
+    
+    clusterEvalQ(cl, library(spatstat)) 
+    clusterEvalQ(cl, library(igraph))
+    clusterEvalQ(cl, library(Matrix))   
+    clusterEvalQ(cl, library(MASS))   
+    clusterEvalQ(cl, library(splines)) 
+    clusterEvalQ(cl, library(dplyr))
+    clusterEvalQ(cl, library(tidyr))
+    
+    message(beta[[i]])
+    fit <- parLapply(cl, 1:R, simulation.chicago.covariates.external, delta = delta, h = h, r = r, beta = beta[[i]], varphi = varphi)
+    print(fit)
+    stopCluster(cl) 
+    
+    df.t$beta[which(df.t$i == i)] <- unlist(fit)[which(names(unlist(fit)) == "beta1")]
+    df.type$beta[which(df.type$i == i)] <- unlist(fit)[which(names(unlist(fit)) == "beta2")] 
+  }
+  
+  df <- bind_rows(df.t, df.type) %>% mutate(kind = factor(kind, levels = c("t", "type")))
+  saveRDS(df, file = "df_simulation_external.rds")
+  g <- ggplot(df, aes(x = i, y = beta)) + 
+    geom_boxplot(aes(color = kind)) + 
+    theme_bw() + 
+    theme(legend.direction = "horizontal") + 
+    theme(legend.justification = c(0.99, 0.99), legend.position = c(0.99, 0.995)) + 
+    labs(color = "Effect", y = expression(paste(hat(beta))),
+         x = "") + 
+    scale_color_hue(labels = c("Time", "Type")) + 
+    scale_x_discrete(labels = c(expression(beta[1]), expression(beta[2]), expression(beta[3]), expression(beta[4]))) + 
+    scale_y_continuous(limits = c(-2, 2), breaks = seq(-2, 2, 0.5))
+  
+  pdf(file = "Plots/simulation_external.pdf", height = 4, width = 6)
+  print(g)
+  dev.off()
+  
+  start <- Sys.time()
+  #a <- simulation.chicago.covariates.external(1, delta, h, r, beta[[1]], varphi)
+  print(Sys.time() - start)
 }
 
 
