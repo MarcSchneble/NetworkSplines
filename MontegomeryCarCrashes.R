@@ -97,7 +97,7 @@ L.lpp$domain$direction <- factor(direction, levels = c("SN", "EW", "SENW", "SWNE
 intens <- intensity.pspline.lpp(L.lpp) 
 intens.covariates <- intensity.pspline.lpp(L.lpp, lins = c("routetype", "direction", "dist2V"), smooths = "hour") 
 plot(intens, log = TRUE)
-plot(intens, log = TRUE)
+plot(intens.covariates, log = TRUE)
 plot(intens, style = "width")
 
 # plot intensity without and with covariates

@@ -629,9 +629,10 @@ fit.lpp = function(L.lpp, smooths = NULL, lins = NULL, offset = NULL,
   names(effects$smooth) <- smooths
   if (length(smooths) > 0){
     for (i in 1:length(smooths)) {
-      confidence.band <- get.confidence.band(theta, V, design, i, smooths)
-      effects$smooth[[i]] <- tibble(x = unique(design$data[[smooths[i]]]),
-                                    y = unique(as.vector(design$Z[, design$ind.smooths[[i + 1]]]%*%theta[design$ind.smooths[[i + 1]]])),
+      ind <- match(unique(design$data[[smooths[i]]]), design$data[[smooths[i]]])
+      confidence.band <- get.confidence.band(theta, V, design, i, ind, smooths)
+      effects$smooth[[i]] <- tibble(x = design$data[[smooths[i]]][ind],
+                                    y = as.vector(design$Z[, design$ind.smooths[[i + 1]]]%*%theta[design$ind.smooths[[i + 1]]])[ind],
                                     lwr = confidence.band$lower,
                                     upr = confidence.band$upper)
     }
@@ -933,7 +934,7 @@ fisher <- function(theta, design, rho){
   return(fisher)
 }
 
-get.confidence.band <- function(theta, V, design, i, smooths, q = 0.05, R = 10000){
+get.confidence.band <- function(theta, V, design, i, ind, smooths, q = 0.05, R = 10000){
   gamma <- theta[design$ind.smooths[[i + 1]]]
   cov <- V[design$ind.smooths[[i + 1]], design$ind.smooths[[i + 1]]]
   x <- unique(design$data[[smooths[i]]])
