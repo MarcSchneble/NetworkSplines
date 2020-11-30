@@ -534,7 +534,7 @@ get.y.km <- function(L){
   return(x)
 }
 
-dist2Vdiscrete <- function(L, threshold = 10){
+dist2Vdiscrete <- function(L, threshold = 20){
   d <- rep(NA, sum(L$N.m))
   ind <- 1
   for (m in 1:L$M) {
@@ -952,4 +952,36 @@ get.confidence.band <- function(theta, V, design, i, ind, smooths, q = 0.05, R =
     upper[j] <- quantile(mu.sim[, j], probs = 1-q/2)
   }
   return(list(lower = lower, upper = upper))
+}
+
+adjust.for.vertex.distance <- function(L.linim, L, dist = 20){
+
+  # network represented by different classes
+  L.psp <- as.psp(L)
+  
+  # pixels for plotting
+  pixels <- which(L.linim$v > 0, arr.ind = T)
+  
+  # x and y coordinates of the pixels
+  x.coord <- y.coord <- rep(0, nrow(pixels))
+  for (i in 1:nrow(pixels)) {
+    x.coord[i] <- L.linim$xcol[pixels[i, 2]]
+    y.coord[i] <- L.linim$yrow[pixels[i, 1]]
+  }
+  # points which need to be colored by intensity
+  L.ppp <- ppp(x.coord, y.coord, window = L$window)
+  
+  # project points on network
+  projection <- project2segment(L.ppp, L.psp)
+  
+  # findest nearest line segment for each image pixel and the location of the point on the line segment
+  dist.vertex <- pmin(projection$tp*L$d[projection$mapXY], L$d[projection$mapXY] - projection$tp*L$d[projection$mapXY])
+  
+  ind <- which(dist.vertex < dist)
+  
+  for (i in ind) {
+    L.linim$v[pixels[i, 1], pixels[i, 2]] <- L.linim$v[pixels[i, 1], pixels[i, 2]]*exp(L.linim$effects$linear$estimate[1])
+  }
+  
+  return(L.linim)
 }

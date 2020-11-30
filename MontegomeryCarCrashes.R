@@ -133,10 +133,10 @@ plot(intens.kernel2d, log = TRUE)
 
 # plot network on map ----
 
-left <- -77.23
-bottom <- 38.94 
-right <- -76.95
-top <- 39.13
+left <- -77.22
+bottom <- 38.948 
+right <- -76.96
+top <- 39.122
 
 g <- ggmap(get_map(location = c(left = left, bottom = bottom, right = right, top = top), maptype = "roadmap", scale = 2)) +
   geom_segment(data = E, aes(x = from.lon, y = from.lat, xend = to.lon, yend = to.lat), size = 1.2) +

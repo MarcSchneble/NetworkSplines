@@ -47,18 +47,17 @@ L <- augment.linnet(L, delta, h, r)
 # read parking data
 data.parking <- readRDS("Data/data_2019_clean.rds")
 data.lots <- readRDS("Data/Parking_Lots.rds") %>% filter(sensor == 1) %>%
-  select(lon, lat, StreetMarker) %>%
+  dplyr::select(lon, lat, StreetMarker) %>%
   mutate(lon = (lon - min.lon)/s, lat = (lat - min.lat)/s)
 data.parking <- left_join(data.parking, data.lots, by = "StreetMarker") %>% 
   filter(h.start >= 8, h.start < 20, State == 1, month(ArrivalTime) %in% c(6, 7, 8)) %>%
   mutate(t = 0.25*floor(m.start/15),
          weekday2 = factor(weekday, levels = c("weekday", "Sat", "Sun"))) %>%
-  replace_na(replace = list(weekday2 = "weekday")) %>%
-  filter(weekday2 == "weekday")
+  replace_na(replace = list(weekday2 = "weekday")) 
 
 # remove parking lots with too few events
 freq <- as.data.frame(table(data.parking$StreetMarker))
-lots.retain <- filter(freq, Freq >= 2*65) %>% pull(Var1) 
+lots.retain <- filter(freq, Freq >= 1*92) %>% pull(Var1) 
 data.parking <- filter(data.parking, StreetMarker %in% lots.retain)
 data.parking$StreetMarker <- factor(data.parking$StreetMarker, levels = unique(data.parking$StreetMarker))
 data.lots <- filter(data.lots, StreetMarker %in% data.parking$StreetMarker)
@@ -80,13 +79,16 @@ L.lpp$data$sos <- data.parking$SideOfStreetCode[match(L.lpp$data$marks, data.par
 
 # intensity estimate of parking lots
 intens.lots <- intensity.pspline.lpp(L.lpp)
-intens.lots.covariates <- intensity.pspline.lpp(L.lpp, lins = c("dist2Vdiscrete", "sos"))
+intens.lots.covariates <- intensity.pspline.lpp(L.lpp, lins = c("dist2Vdiscrete"))
 
 # only where intensity is at least 0.1
 intens.lots.adj <- intens.lots
 intens.lots.covariates.adj <- intens.lots.covariates
 intens.lots.adj$v[which(intens.lots$v < 0.1, arr.ind = TRUE)] = NA
 intens.lots.covariates.adj$v[which(intens.lots.covariates$v < 0.1, arr.ind = TRUE)] = NA
+intens.lots.covariates.vertex <- adjust.for.vertex.distance(intens.lots.covariates, L)
+intens.lots.covariates.vertex.adj <- intens.lots.covariates.vertex
+intens.lots.covariates.vertex.adj$v[which(intens.lots.covariates.vertex$v < 0.1, arr.ind = TRUE)] <- NA
 
 # plot parking lots on the geometric network
 pdf(file = "Plots/MelbourneLots.pdf", width = 10, height = 8)
@@ -100,14 +102,24 @@ min.intens <- min(intens.lots$v, na.rm = TRUE)
 max.intens <- max(intens.lots$v, na.rm = TRUE)
 pdf(file = "Plots/MelbourneIntensityLots.pdf", width = 10, height = 8)
 par(mar=c(0, 0, 0, 1), cex = 1.6)
-plot(intens.lots.adj, log = TRUE,
+plot(intens.lots.adj, log = TRUE, 
      main = "")
+for (e in 1:L$lines$n) {
+  lines(L$lines$ends[e, c(1, 3)], L$lines$ends[e, c(2, 4)], cex = 0.5, col = "grey")
+}
+plot(intens.lots.adj, log = TRUE,
+     main = "", add = TRUE)
 dev.off()
 
 pdf(file = "Plots/MelbourneIntensityLotsCovariates.pdf", width = 10, height = 8)
 par(mar=c(0, 0, 0, 1), cex = 1.6)
 plot(intens.lots.covariates.adj, log = TRUE,
      main = "")
+for (e in 1:L$lines$n) {
+  lines(L$lines$ends[e, c(1, 3)], L$lines$ends[e, c(2, 4)], cex = 0.5, col = "grey")
+}
+plot(intens.lots.covariates.adj, log = TRUE,
+     main = "", add = TRUE)
 dev.off()
 
 
@@ -124,8 +136,7 @@ L.lpp.parking$data$weekday <- covariates$weekday
 L.lpp.parking$data$sos <- covariates$SideOfStreetCode
 
 # fitting
-intens.parking <- intensity.pspline.lpp(L.lpp.parking)
-intens.parking.covariates <- intensity.pspline.lpp(L.lpp.parking, smooths = "t", lins = "sos")
+intens.parking.covariates <- intensity.pspline.lpp(L.lpp.parking, smooths = "t")
 
 # plot smooth effects
 g <- ggplot(intens.parking.covariates$effects$smooth$t) + 
@@ -133,19 +144,20 @@ g <- ggplot(intens.parking.covariates$effects$smooth$t) +
   geom_line(aes(x = x, y = y), color = "red") + 
   scale_x_continuous(limits = c(8, 20), breaks = 8:20) +
   theme_bw() + 
-  labs(x = "Time of the day", y = "s(t)")
+  labs(x = "Hour of the day", y = "s(t)")
 pdf(file = "Plots/Melbourne_smooth_t.pdf", width = 6, height = 4)
 print(g)
 dev.off()
 
+# fluctuation
 intens.parking.adj <- intens.parking.covariates
-intens.parking.adj$v[which(is.na(intens.lots.adj$v) | intens.parking$v < 10)] <- NA
+intens.parking.adj$v[which(is.na(intens.lots.covariates.vertex.adj$v) | intens.parking.covariates$v < 1)] <- NA
 intens.parking.adj$v <- intens.parking.adj$v/92*4
 plot(intens.parking.adj)
 plot(intens.parking.adj, log = TRUE)
 
 intens.fluctuation <- intens.parking.adj
-intens.fluctuation$v <- intens.fluctuation$v/intens.lots.adj$v
+intens.fluctuation$v <- intens.fluctuation$v/intens.lots.covariates.vertex.adj$v
 
 ind <- which(intens.fluctuation$v > 5, arr.ind = TRUE)
 y.coord <- intens.fluctuation$yrow[ind[, 1]]
@@ -154,5 +166,9 @@ x.coord <- intens.fluctuation$xcol[ind[, 2]]
 pdf("Plots/Melbourne_fluctuation_rate.pdf", width = 10, height = 6)
 par(mar=c(0, 0, 0, 1), cex = 1.6)
 plot(intens.fluctuation, log = TRUE, main = "")
-points(x.coord, y.coord, pch = 21, col = "grey80", cex = 2)
+for (e in 1:L$lines$n) {
+  lines(L$lines$ends[e, c(1, 3)], L$lines$ends[e, c(2, 4)], cex = 0.5, col = "grey")
+}
+points(x.coord, y.coord, cex = 2)
+plot(intens.fluctuation, log = TRUE, main = "", add = TRUE)
 dev.off()
