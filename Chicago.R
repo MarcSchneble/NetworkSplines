@@ -43,11 +43,6 @@ if (simulation.intensity.kernel | simulation.external | simulation.intensity.del
   sigma <- bw.scott(L.lpp)
   intens.kernel2d <- density.lpp(L.lpp, sigma = sigma, distance = "euclidean", dimyx = c(256, 256))
   
-  # intensity with Voronoi estimate
-  #set.seed(1)
-  #f <- bw.voronoi(chicago)
-  #intens.voronoi <- densityVoronoi(chicago, f = as.numeric(f), nrep = 100, dimyx = c(256, 256))
-  
   # plots
   pdf(file = "Plots/ChicagoNetwork.pdf", width = 10, height = 8)
   par(mar=c(0, 0, 0, 0), cex = 1.6)
@@ -489,7 +484,6 @@ if (simulation.external){
   for (i in 1:length(beta)) {
     
     no_cores <- min(detectCores() - 2, 20)
-    #detectCores() - 2
     set.seed(1)
     
     cl <- makeCluster(no_cores)
@@ -528,128 +522,4 @@ if (simulation.external){
   pdf(file = "Plots/simulation_external.pdf", height = 4, width = 6)
   print(g)
   dev.off()
-  
-  start <- Sys.time()
-  #a <- simulation.chicago.covariates.external(1, delta, h, r, beta[[1]], varphi)
-  print(Sys.time() - start)
 }
-
-
-if (simulation.intensity.kernel.old){
-  
-  R <- 100
-  delta <- 10
-  h <- 2
-  r <- 2
-  varphi <- intens.kernel
-  n <- c(100, 200, 500, 1000)
-  
-  (test <- simulation.chicago(1, delta, h, r, 200, varphi, kernel = TRUE, kernel2d = TRUE))
-  
-  df.pspline <- tibble(n = as.factor(rep(n, each = R)), ISE = NA, kind = "pspline")
-  df.kernel <- tibble(n = as.factor(rep(n, each = R)), ISE = NA, kind = "kernel")
-  df.kernel2d <- tibble(n = as.factor(rep(n, each = R)), ISE = NA, kind = "kernel2d")
-  
-  for (i in 1:length(n)) {
-    
-    no_cores <- min(detectCores() - 2, 10)
-    set.seed(1)
-    
-    cl <- makeCluster(no_cores)
-    clusterExport(cl, ls())
-    
-    clusterEvalQ(cl, library(spatstat)) 
-    clusterEvalQ(cl, library(igraph))
-    clusterEvalQ(cl, library(Matrix))   
-    clusterEvalQ(cl, library(MASS))   
-    clusterEvalQ(cl, library(splines)) 
-    clusterEvalQ(cl, library(dplyr))
-    clusterEvalQ(cl, library(tidyr))
-    
-    message(n[i])
-    ISE <- parLapply(cl, 1:R, simulation.chicago, delta = delta, h = h, r = r, n = n[i], varphi = varphi, kernel = TRUE, kernel2d = TRUE)
-    stopCluster(cl) 
-    
-    df.pspline$ISE[which(df.pspline$n == n[i])] <- unlist(ISE)[which(names(unlist(ISE)) == "ISE.pspline")]
-    df.kernel$ISE[which(df.kernel$n == n[i])] <- unlist(ISE)[which(names(unlist(ISE)) == "ISE.kernel")] 
-    df.kernel2d$ISE[which(df.kernel2d$n == n[i])] <- unlist(ISE)[which(names(unlist(ISE)) == "ISE.kernel2d")]
-  }
-  
-  df <- bind_rows(df.pspline, df.kernel, df.kernel2d) %>% 
-    mutate(kind = factor(kind, levels = c("pspline", "kernel", "kernel2d")))
-  saveRDS(df, file = "df_simulation_intensity_n.rds")
-  g <- ggplot(df %>% mutate(ISE = 10000*ISE), aes(x = n, y = ISE)) + 
-    geom_boxplot(aes(color = kind)) + 
-    theme_bw() + 
-    theme(legend.justification = c(0.01, 0.99), legend.position = c(0.01, 0.995)) + 
-    labs(color = "Estimate") + 
-    scale_y_continuous(limits = c(0, 0.5)) + 
-    scale_color_hue(labels = c("penalized spline based estimate", "kernel estimate based on shortest path distance", "kernel estimate based on Euclidean distance"))
-  
-  pdf(file = "Plots/simulation_n.pdf", height = 6, width = 6)
-  print(g)
-  dev.off()
-}
-
-if (simulation.intensity.edges.old){
-  
-  R <- 100
-  delta <- 10
-  h <- 2
-  r <- 2
-  L <- augment.linnet(as.linnet(chicago), delta, h, r)
-  n <- c(100, 200, 500, 1000)
-  
-  H <- function(x, y, seg, tp){
-    1*(seg %% 10 == 0)
-  }
-  varphi <- as.linim(linfun(H, L), dimyx = c(256, 256))
-  varphi <- varphi/integral.linim(varphi)
-  
-  
-  df.pspline <- tibble(n = as.factor(rep(n, each = R)), ISE = NA, kind = "pspline")
-  df.kernel <- tibble(n = as.factor(rep(n, each = R)), ISE = NA, kind = "kernel")
-  df.kernel2d <- tibble(n = as.factor(rep(n, each = R)), ISE = NA, kind = "kernel2d")
-  
-  for (i in 1:length(n)) {
-    
-    no_cores <- min(detectCores() - 2, 20)
-    set.seed(1)
-    
-    cl <- makeCluster(no_cores)
-    clusterExport(cl, ls())
-    
-    clusterEvalQ(cl, library(spatstat)) 
-    clusterEvalQ(cl, library(igraph))
-    clusterEvalQ(cl, library(Matrix))   
-    clusterEvalQ(cl, library(MASS))   
-    clusterEvalQ(cl, library(splines)) 
-    clusterEvalQ(cl, library(dplyr))
-    clusterEvalQ(cl, library(tidyr))
-    
-    message(n[i])
-    ISE <- parLapply(cl, 1:R, simulation.chicago, delta = delta, h = h, r = r, n = n[i], varphi = varphi, kernel = TRUE, kernel2d = TRUE)
-    stopCluster(cl) 
-    
-    df.pspline$ISE[which(df.pspline$n == n[i])] <- unlist(ISE)[which(names(unlist(ISE)) == "ISE.pspline")]
-    df.kernel$ISE[which(df.kernel$n == n[i])] <- unlist(ISE)[which(names(unlist(ISE)) == "ISE.kernel")] 
-    df.kernel2d$ISE[which(df.kernel2d$n == n[i])] <- unlist(ISE)[which(names(unlist(ISE)) == "ISE.kernel2d")]
-  }
-  
-  df <- bind_rows(df.pspline, df.kernel, df.kernel2d) %>% 
-    mutate(kind = factor(kind, levels = c("pspline", "kernel", "kernel2d")))
-  saveRDS(df, file = "df_simulation_intensity_edges_n.rds")
-  g <- ggplot(df %>% mutate(ISE = 10000*ISE), aes(x = n, y = ISE)) + 
-    geom_boxplot(aes(color = kind)) + 
-    theme_bw() + 
-    theme(legend.justification = c(0.01, 0.99), legend.position = c(0.01, 0.995)) + 
-    labs(color = "Estimate") + 
-    scale_y_continuous(limits = c(0, 5)) + 
-    scale_color_hue(labels = c("penalized spline based estimate", "kernel estimate based on shortest path distance", "kernel estimate based on Euclidean distance"))
-  
-  pdf(file = "Plots/simulation_edges_n.pdf", height = 6, width = 6)
-  print(g)
-  dev.off()
-}
-
-

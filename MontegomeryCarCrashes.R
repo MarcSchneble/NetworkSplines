@@ -17,7 +17,7 @@ library(mgcv)
 
 # load functions
 source(file = "Functions.R")
-register_google("AIzaSyDX0CVJsIDBJF8NVFPAH84oLWPfvPa335Y")
+#register_google("")
 
 # get data on car crashes
 data <- read.csv(file = "Data/CarCrashesMontgomery_Incidents.csv") %>% as_tibble() %>%
