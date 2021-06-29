@@ -71,9 +71,12 @@ reduce.linnet <- function(L){
   L$M <- length(L$d)
   
   # ensure that J.m > 0
-  delta <- min(delta, min(L$d)/2)
+  #delta <- min(delta, min(L$d)/2)
   # line specific knot distances
-  delta.m <- L$d/floor(L$d/delta)*(L$d/delta - floor(L$d/delta) < 0.5) + L$d/ceiling(L$d/delta)*(L$d/delta - floor(L$d/delta) >= 0.5)
+  #delta.m <- L$d/floor(L$d/delta)*(L$d/delta - floor(L$d/delta) < 0.5) + L$d/ceiling(L$d/delta)*(L$d/delta - floor(L$d/delta) >= 0.5)
+  d <- L$d
+  delta <- d*(delta > d) + delta*(delta <= d)
+  delta.m = pmin(d/floor(d/delta)*(d/delta - floor(d/delta) < 0.5) + d/ceiling(d/delta)*(d/delta - floor(d/delta) >= 0.5), d/2)
   
   # ensure that h <= delta
   h <- min(h, delta)
@@ -769,14 +772,14 @@ simulation.chicago <- function(s, delta, h, r, n, varphi, kernel = FALSE, kernel
   intens.pspline <- intensity.pspline.lpp(L.lpp)
   ISE.pspline <- integral.linfun((intens.pspline - varphi)^2)/n^2
   if (kernel) {
-    sigma <- as.numeric(bw.lppl(L.lpp, sigma = c(seq(10, 100, 5), seq(110, 250, 10))))
+    sigma <- as.numeric(bw.lppl(L.lpp, distance = "path"))
     intens.kernel <- density.lpp(L.lpp, sigma = sigma, dimyx = c(256, 256))
     ISE.kernel <- integral.linfun((intens.kernel - varphi)^2)/n^2
   } else {
     ISE.kernel <- NULL
   }
   if (kernel2d){
-    sigma <- bw.scott(L.lpp)
+    sigma <- bw.scott.iso(L.lpp)
     intens.kernel2d <- density.lpp(L.lpp, sigma = sigma, distance = "euclidean", dimyx = c(256, 256))
     ISE.kernel2d <- integral.linfun((intens.kernel2d - varphi)^2)/n^2
   } else {

@@ -49,7 +49,7 @@ P <- ppp(x = V$lon, y = V$lat,
          window = owin(xrange = c(min(V$lon), max(V$lon)), yrange = c(min(V$lat), max(V$lat))))
 L <- linnet(vertices = P, edges = as.matrix(E[, 2:3]))
 s <- L$dpath[191, 193]/2.2
-L <- spatstat::rescale(L, s = s, unitname = "Kilometers")
+L <- spatstat.geom::rescale(L, s = s, unitname = "Kilometers")
 
 data <- data %>%
   mutate(lon.net = (lon - min.lon)/s, lat.net = (lat - min.lat)/s)

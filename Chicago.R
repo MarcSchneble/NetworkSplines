@@ -36,37 +36,40 @@ if (simulation.intensity.kernel | simulation.external | simulation.intensity.del
   intens.pspline <- intensity.pspline.lpp(L.lpp)
   
   # intensity estimate with kernel based approach
-  sigma <- bw.lppl(L.lpp, sigma = seq(50, 200, 0.1))
+  sigma <- bw.lppl(L.lpp, distance = "path")
   intens.kernel <- density.lpp(L.lpp, sigma = as.numeric(sigma), dimyx = c(256, 256))
   
   # intensity estimate with two-dimensional kernel
-  sigma <- bw.scott(L.lpp)
+  sigma <- bw.scott.iso(L.lpp)
   intens.kernel2d <- density.lpp(L.lpp, sigma = sigma, distance = "euclidean", dimyx = c(256, 256))
   
   # plots
-  pdf(file = "Plots/ChicagoNetwork.pdf", width = 10, height = 8)
+  pdf(file = "Plots/ChicagoNetwork.pdf", width = 8, height = 5.5)
   par(mar=c(0, 0, 0, 0), cex = 1.6)
   plot(L.lpp, main = "", lwd = 3, leg.side = "right",
-       cols = scales::hue_pal()(7), chars = 0:6, size = 1)
+       cols = scales::hue_pal()(7), chars = 0:6, size = 1, leg.args = list(sep = 0.0001))
   dev.off()
   
-  max.intens <- max(intens.pspline$v, intens.kernel$v, na.rm = TRUE)
+  max.intens <- max(intens.pspline$v, intens.kernel$v, intens.kernel2d$v, na.rm = TRUE)
   
-  pdf(file = "Plots/ChicagoIntensityPSpline.pdf", width = 10, height = 8)
+  pdf(file = "Plots/ChicagoIntensityPSpline.pdf", width = 8, height = 6.5)
   par(mar=c(0, 0, 0, 1), cex = 1.6)
-  plot.linim(intens.pspline, main = "" , zlim = c(0, max.intens))
+  plot.linim(intens.pspline, main = "" , zlim = c(0, max.intens), ribsep = -0.05, 
+             box = TRUE, ribwid = 0.08)
   points(X)
   dev.off()
   
-  pdf(file = "Plots/ChicagoIntensityKernel.pdf", width = 10, height = 8)
+  pdf(file = "Plots/ChicagoIntensityKernel.pdf", width = 8, height = 6.5)
   par(mar=c(0, 0, 0, 1), cex = 1.6)
-  plot.linim(intens.kernel, main = "", zlim = c(0, max.intens)) 
+  plot.linim(intens.kernel, main = "" , zlim = c(0, max.intens), ribsep = -0.05, 
+             box = TRUE, ribwid = 0.08) 
   points(X)
   dev.off()
   
-  pdf(file = "Plots/ChicagoIntensityKernel2d.pdf", width = 10, height = 8)
+  pdf(file = "Plots/ChicagoIntensityKernel2d.pdf", width = 8, height = 6.5)
   par(mar=c(0, 0, 0, 1), cex = 1.6)
-  plot.linim(intens.kernel2d, main = "") 
+  plot.linim(intens.kernel2d, main = "" , zlim = c(0, max.intens), ribsep = -0.05, 
+             box = TRUE, ribwid = 0.08) 
   points(X)
   dev.off()
   
@@ -82,13 +85,15 @@ if (simulation.intensity.kernel | simulation.external | simulation.intensity.del
                lower = beta - 1.96*se, upper = beta + 1.96*se,
                kind = factor(c(rep("pspline", 6), rep("poisson", 6)), levels = c("pspline", "poisson"))) 
   
-  g <- ggplot(df) + geom_point(aes(x = nr, y = beta, color = kind)) + 
+  g <- ggplot(df) + geom_point(aes(x = nr, y = beta, color = kind, shape = kind), size = 2.5) + 
     geom_errorbar(aes(x = nr, ymin = lower, ymax = upper, color = kind), width = 0.7, alpha = 0.7) + 
     theme_bw() + 
     scale_color_hue(labels = c("penalized spline based", "Poisson process")) +
+    scale_shape(labels = c("penalized spline based", "Poisson process")) +
     theme(legend.justification = c(0.01, 0.99), legend.position = c(0.01, 0.995), 
           panel.grid.major.x = element_blank(), panel.grid.minor.x = element_blank()) + 
-    labs(color = "Estimate", x = "Kind of crime", y = "Effect size on the log-scale and confidence interval") + 
+    labs(color = "Estimate", shape = "Estimate", 
+         x = "Kind of crime", y = "Effect size on the log-scale\nand 95% confidence interval") + 
     scale_x_continuous(breaks = seq(1.5, 11.5, 2), labels = c("Burglary", "Cartheft", "Damage", "Robbery", "Theft", "Trespass")) + 
     scale_y_continuous(breaks = seq(-2.5, 1, 0.5)) 
   
