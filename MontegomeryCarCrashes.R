@@ -101,14 +101,14 @@ plot(intens.covariates, log = TRUE)
 plot(intens, style = "width")
 
 # plot intensity without and with covariates
-pdf(file = "Plots/Montgomery_intensity.pdf", width = 10, height = 6)
+pdf(file = "Plots/Montgomery_intensity.pdf", width = 8, height = 5)
 par(mar=c(0, 0, 0, 1), cex = 1.6)
-plot(intens/4, log = TRUE, main = "")
+plot(intens/4, log = TRUE, main = "", ribwid = 0.06, ribsep = 0, box = TRUE)
 dev.off()
 
-pdf(file = "Plots/Montgomery_intensity_covariates.pdf", width = 10, height = 6)
+pdf(file = "Plots/Montgomery_intensity_covariates.pdf", width = 8, height = 5)
 par(mar=c(0, 0, 0, 1), cex = 1.6)
-plot(intens.covariates, log = TRUE, main = "")
+plot(intens.covariates, log = TRUE, main = "", ribwid = 0.06, ribsep = 0, box = TRUE)
 dev.off()
 
 # plot smooth effects
@@ -145,8 +145,10 @@ g <- ggmap(get_map(location = c(left = left, bottom = bottom, right = right, top
 
 g <- ggmap(get_map(location = c(left = left, bottom = bottom, right = right, top = top), maptype = "roadmap", scale = 2)) +
   geom_segment(data = E %>% slice(L$ind.edges), aes(x = from.lon, y = from.lat, xend = to.lon, yend = to.lat), size = 1.5) +
-  geom_point(data = data %>% filter(on == 1), aes(x = lon, y = lat), col = "red", alpha = 0.1) + 
-  labs(x = "Longitude", y = "Latitude")
+  geom_point(data = data %>% filter(on == 1), aes(x = lon, y = lat), col = "red", alpha = 0.2) + 
+  labs(x = "Longitude", y = "Latitude") + 
+  theme(axis.text = element_text(size = 15),
+        axis.title = element_text(size = 15))
 
 pdf(file = "Plots/MontgomeryNetwork.pdf", height = 8, width = 10)
 print(g)
