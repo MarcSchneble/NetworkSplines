@@ -70,6 +70,7 @@ if (simulation.intensity.kernel | simulation.external | simulation.intensity.del
   par(mar=c(0, 0, 0, 1), cex = 1.6)
   plot.linim(intens.kernel2d, main = "" , zlim = c(0, max.intens), ribsep = -0.05, 
              box = TRUE, ribwid = 0.08) 
+  rect(xleft = 770, ybottom = 1100, xright = 880, ytop = 1215, col = rgb(0,0,1.0,alpha=0.01), lwd = 2)
   points(X)
   dev.off()
   
