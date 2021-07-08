@@ -81,6 +81,7 @@ L.lpp$data$sos <- data.parking$SideOfStreetCode[match(L.lpp$data$marks, data.par
 intens.lots <- intensity.pspline.lpp(L.lpp, dimyx = c(150, 250))
 intens.lots.covariates <- intensity.pspline.lpp(L.lpp, lins = c("dist2Vdiscrete"),
                                                 dimyx = c(150, 250))
+intens.lots.covariates$effects$linear
 
 # only where intensity is at least 0.1
 intens.lots.adj <- intens.lots

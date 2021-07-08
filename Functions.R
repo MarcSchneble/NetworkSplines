@@ -1,148 +1,3 @@
-reduce.linnet <- function(L){
-  
-  # degrees of vertices in the network
-  V.deg <- degree(graph_from_adjacency_matrix(L$A, mode = "undirected"))
-  
-  # vertex indices with degree 2
-  ind.deg.2 <- which(V.deg == 2)
-  ind.v.null <- ind.deg.2
-  
-  # initialize
-  ind.m.delete <- NULL
-  new.d <- new.from <- new.to <- NULL
-  i <- 0
-  P <- list()
-  
-  # remove vertices with degree until none is left
-  while(length(ind.deg.2) > 0){
-    i <- i+1
-    
-    # find the two adjacent vertices to vertex with degree 2
-    adj <- which(L$A[ind.deg.2[1], ] == 1)
-    P[[i]] <- data.frame(from = c(adj[1], ind.deg.2[1]), 
-                         to = c(ind.deg.2[1], adj[2]),
-                         m = NA,
-                         length = NA)
-    
-    # go into the direction of the first adjecent vertex and search for more
-    # vertices with degree 2
-    while(sum(L$A[adj[1], ]) == 2){
-      adj.new <- which(L$A[adj[1], ] == 1)
-      l <- adj.new[which(!is.element(adj.new, P[[i]]$from))]
-      P[[i]] <- rbind(c(l, adj[1], NA, NA), P[[i]])
-      adj[1] <- l
-    }
-    
-    # go into the direction of the second adjecent vertex and search for more
-    # vertices with degree 2
-    while(sum(L$A[adj[2], ]) == 2){
-      adj.new <- which(L$A[adj[2], ] == 1)
-      r <- adj.new[which(!is.element(adj.new, P[[i]]$to))]
-      P[[i]] <- rbind(P[[i]], c(adj[2], r, NA, NA))
-      adj[2] <- r
-    }
-    
-    # save the line indices and their corresponding lengths which are removed from the network
-    for (k in 1:nrow(P[[i]])) {
-      P[[i]]$m[k] <- which(L$from == P[[i]]$from[k] & L$to == P[[i]]$to[k] | L$from == P[[i]]$to[k] & L$to == P[[i]]$from[k])
-      P[[i]]$length[k] <- L$d[P[[i]]$m[k]]
-    }
-    
-    # add new connections in the adjacency matrix
-    L$A[P[[i]]$from[1], P[[i]]$to[nrow(P[[i]])]] <- L$A[P[[i]]$to[nrow(P[[i]])], P[[i]]$from[1]] <- 1
-    # add line segments to the delete vector
-    ind.m.delete <- unique(c(ind.m.delete, P[[i]]$m))
-    # compute new distances and the to/from vectors
-    new.d <- c(new.d, sum(P[[i]]$length))
-    new.from <- c(new.from, P[[i]]$from[1])
-    new.to <- c(new.to, P[[i]]$to[nrow(P[[i]])])
-    
-    # remove vertices from the current vector of vertices with degree 2
-    ind.deg.2 <- setdiff(ind.deg.2, P[[i]]$to[1:(nrow(P[[i]])-1)])
-  }
-  # update adjacency matrix
-  L$A[ind.v.null, ] <- 0
-  L$A[, ind.v.null] <- 0
-  
-  # delete line segments and add new line segments
-  L$d <- c(L$d[- ind.m.delete], new.d)
-  L$from <- c(L$from[- ind.m.delete], new.from)
-  L$to <- c(L$to[- ind.m.delete], new.to)
-  L$M <- length(L$d)
-  
-  # ensure that J.m > 0
-  #delta <- min(delta, min(L$d)/2)
-  # line specific knot distances
-  #delta.m <- L$d/floor(L$d/delta)*(L$d/delta - floor(L$d/delta) < 0.5) + L$d/ceiling(L$d/delta)*(L$d/delta - floor(L$d/delta) >= 0.5)
-  d <- L$d
-  delta <- d*(delta > d) + delta*(delta <= d)
-  delta.m = pmin(d/floor(d/delta)*(d/delta - floor(d/delta) < 0.5) + d/ceiling(d/delta)*(d/delta - floor(d/delta) >= 0.5), d/2)
-  
-  # ensure that h <= delta
-  h <- min(h, delta)
-  # line specific bin widths
-  h.m <- L$d/floor(L$d/h)*(L$d/h - floor(L$d/h) < 0.5) + L$d/ceiling(L$d/h)*(L$d/h - floor(L$d/h) >= 0.5)
-  
-  # initializing...
-  tau <- b <- z <- vector("list", L$M) 
-  V.left <- V.right <- vector("list", L$W)
-  N.m <- J.m <- rep(0, L$M)
-  
-  # do for every line segment
-  for (m in 1:L$M) {
-    
-    # knot sequences tau
-    tau[[m]] <- seq(0, L$d[m], delta.m[m])
-    
-    # bin boundaries b
-    b[[m]] <- seq(0, L$d[m], h.m[m])
-    
-    # characterization of bins by midpoints z
-    z[[m]] <- (b[[m]][1:(length(b[[m]])-1)] + b[[m]][2:length(b[[m]])])/2
-    
-    # total count of bins in the geometric network
-    N.m[m] <- length(z[[m]])
-    
-    # count of linear B-splines on line segment
-    J.m[m] <- length(tau[[m]]) - 2
-  }
-  
-  # degrees of vertices in the network
-  V.deg <- degree(graph_from_adjacency_matrix(L$A, mode = "undirected"))
-  
-  # incident lines to vertices
-  # V.out and V.in instead of V.left and V.right
-  for (v in 1:L$W) {
-    vv <- which(L$A[v, ] == 1)
-    if (length(vv) > 0){
-      for (q in vv) {
-        V.left[[v]] <- c(V.left[[v]], which(L$to == q & L$from == v))
-        V.right[[v]] <- c(V.right[[v]], which(L$from == q & L$to == v))
-      }
-      V.left[[v]] <- sort(unique(V.left[[v]]))
-      V.right[[v]] <- sort(unique(V.right[[v]]))
-    } else {
-      V.left[[v]] <- which(1 == 0)
-      V.right[[v]] <- which(1 == 0)
-    }
-  }
-  
-  # replace in linnet object
-  L$delta <- delta.m
-  L$tau <- tau
-  L$b <- b
-  L$z <- z
-  L$J.m <- J.m
-  L$J <- sum(J.m) + L$W - length(ind.v.null)
-  L$N.m <- N.m
-  L$V.deg <- V.deg
-  L$V.l <- V.left
-  L$V.r <- V.right
-  L$ind.v.null <- ind.v.null
-  
-  return(L)
-}
-
 augment.linnet = function(L, delta, h, r, geninv = FALSE){
   # this function augments an object of class "linnet" by several attributes depending on delta, h and r
   
@@ -585,10 +440,9 @@ fit.lpp = function(L.lpp, smooths = NULL, lins = NULL, offset = NULL,
   theta <- rep(0, ncol(design$Z))
   while(Delta.rho > eps.rho){
     it.rho <- it.rho + 1
-    fit <- optim(theta, fn = logL, gr = score, design = design, rho = rho, 
-                 control = list(fnscale = -1, maxit = 1000, factr = 1e4),
-                 method = "L-BFGS-B")
-    theta <- fit$par
+    
+    theta <- scoring(theta, design, rho)
+
     V <- solve(fisher(theta, design, rho))
     
     # update rho 
@@ -759,33 +613,27 @@ intensity.pspline.lpp = function(L.lpp, smooths = NULL, lins = NULL, offset = NU
   return(L.linim)
 }
 
+
 simulation.chicago <- function(s, delta, h, r, n, varphi, kernel = FALSE, kernel2d = FALSE) {
   
   # simulate n points with intensity f
   L.lpp <- rlpp(n = n, f = varphi)
   
-  # scale varphi for computation of ISE
-  varphi <- varphi/integral.linim(varphi)*n
-  print(integral.linfun(varphi))
-  
   # compute estimates and ISE
   intens.pspline <- intensity.pspline.lpp(L.lpp)
-  ISE.pspline <- integral.linfun((intens.pspline - varphi)^2)/n^2
   if (kernel) {
     sigma <- as.numeric(bw.lppl(L.lpp, distance = "path"))
     intens.kernel <- density.lpp(L.lpp, sigma = sigma, dimyx = c(256, 256))
-    ISE.kernel <- integral.linfun((intens.kernel - varphi)^2)/n^2
   } else {
-    ISE.kernel <- NULL
+    intens.kernel <- NULL
   }
   if (kernel2d){
     sigma <- bw.scott.iso(L.lpp)
     intens.kernel2d <- density.lpp(L.lpp, sigma = sigma, distance = "euclidean", dimyx = c(256, 256))
-    ISE.kernel2d <- integral.linfun((intens.kernel2d - varphi)^2)/n^2
   } else {
-    ISE.kernel2d <- NULL
+    intens.kernel2d <- NULL
   }
-  return(list(ISE.pspline = ISE.pspline, ISE.kernel = ISE.kernel, ISE.kernel2d = ISE.kernel2d))
+  return(list(intens.pspline = intens.pspline, intens.kernel = intens.kernel, intens.kernel2d = intens.kernel2d))
 }
 
 simulation.chicago.covariates.internal <- function(s, delta, h, r, n, varphi){
@@ -821,88 +669,6 @@ simulation.chicago.covariates.external <- function(s, delta, h, r, beta, varphi)
   ) 
   return(list(beta = tail(fit$theta.hat, 2), se = fit$effects$linear$se))
 }
-
-intensity.edge = function(z, L, m, gamma.hat, n, varphi){
-  # returns the squared difference of the estimated and the true intensity 
-  
-  B = matrix(0, length(z), L$J.m[m]+2)
-  B[, 1] = (1-z/L$delta[m])*(1-z/L$delta[m] > 0)
-  B[, 2:(ncol(B)-1)] = splineDesign(knots = L$tau[[m]], x = z, ord = 2, outer.ok = TRUE)
-  B[, ncol(B)] = (1-(L$d[m]-z)/L$delta[m])*(1-(L$d[m]-z)/L$delta[m] > 0)
-  
-  gamma.hat.m = c(gamma.hat[sum(L$J.m)+L$from[m]],
-                  gamma.hat[((cumsum(L$J.m)-L$J.m)[m]+1):cumsum(L$J.m)[m]],
-                  gamma.hat[sum(L$J.m)+L$to[m]])
-  if (min(z) >= 0 & max(z) <= L$d[m]) {
-    return((as.vector(exp(B%*%gamma.hat.m)) - varphi(seg = m, tp = z/L$d[m]))^2)
-  } else {
-    stop("Wrong domain of z on this edge!")
-  }
-}
-
-ise.intensity.splines = function(L.lpp, varphi){
-  # returns edge-wise ISE for penalized spline based estimate
-  
-  n <- nrow(L.lpp$data)
-  L <- as.linnet(L.lpp)
-  fit <- fit.lpp(L.lpp)
-  gamma.hat <- fit$theta.hat
-  ISE <- rep(0, L$M)
-  for (m in 1:L$M) {
-    # very rarely, bad integral behavior causes an error
-    ISE[m] <- tryCatch(integrate(f = intensity.edge, lower = 0, upper = L$d[m], L = L, m = m, 
-                                 gamma.hat = gamma.hat, n = n, varphi = varphi, subdivisions = 1000)$value,
-                       error = function(cond){
-                         message(paste(cond), "")
-                         return(0)
-                       })
-  }
-  return(ISE)
-}
-
-squared.diff.linfun = function(z, m, L, f1, f2){
-  # returns squared difference of two functions f1 and f2 on L at z of segment m
-  
-  return((f1(tp = z/L$d[m], seg = m) - f2(tp = z/L$d[m], seg = m))^2)
-}
-
-ise.linfun = function(f1, f2, L){
-  # returns edge-wise ISE of f1 and f2 on L
-  
-  ISE = rep(0, L$M)
-  for (m in 1:L$M) {
-    # very rarely, bad integral behavior causes an error
-    ISE[m] = tryCatch(integrate(f = squared.diff.linfun, lower = 0, upper = L$d[m], m = m, 
-                                L = L, f1 = f1, f2 = f2, subdivisions = 1000)$value,
-                      error = function(cond){
-                        message(paste(cond), "")
-                        return(0)
-                      })
-  }
-  return(ISE)
-}
-
-simulation.study = function(s, delta, h, r, n, varphi, L, kernel = TRUE){
-  # function for parallel computing of penalized spline ISE and (if kernel = TRUE) kernel based ISE
-  
-  # simulate n points with intensity varphi
-  L.lpp <- rlpp(n = n, varphi)
-  
-  # compute ISE for penalized spline based estimate
-  # very rarely, singularities occur and cause an error
-  ISE.pspline <- tryCatch(sum(ise.intensity.splines(L.lpp, r, varphi))/n^2,
-                          error = function(cond){
-                            message(paste(cond), "")
-                            return(0)
-                          })
-  if (kernel){
-    ISE.kernel <- sum(ise.linfun(as.linfun(density.lpp(L.lpp, sigma = as.numeric(bw.lppl(L.lpp)))), varphi, L))/n^2
-    return(list(ISE.pspline = ISE.pspline, ISE.kernel = ISE.kernel))
-  } else {
-    return(list(ISE.pspline = ISE.pspline))
-  }
-}
-
 
 logL <- function(theta, design, rho){
   mu <- exp(as.vector(design$Z%*%theta) + log(design$data$h) + log(design$data$offset))
@@ -987,4 +753,19 @@ adjust.for.vertex.distance <- function(L.linim, L, dist = 20){
   }
   
   return(L.linim)
+}
+
+scoring <- function(theta, design, rho, eps_theta = 1e-5){
+  # perform iterative least squares estimation for a Poisson model with offset
+  
+  Delta_theta <- Inf
+  it <- 0
+  while (Delta_theta > eps_theta) {
+    it <- it + 1
+    theta_new <- as.vector(theta + Matrix::solve(fisher(theta, design, rho))%*%score(theta, design, rho))
+    Delta_theta <- as.numeric(sqrt(t(theta - theta_new)%*%(theta - theta_new)))/
+      as.numeric(sqrt(t(theta)%*%theta))
+    theta <- as.vector(theta_new)
+  }
+  theta
 }

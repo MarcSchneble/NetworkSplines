@@ -105,8 +105,6 @@ if (simulation.intensity.kernel | simulation.external | simulation.intensity.del
 
 
 
-# simulation of network ----
-
 if (simulation.intensity.kernel){
   
   R <- 100
@@ -116,7 +114,8 @@ if (simulation.intensity.kernel){
   varphi <- intens.kernel
   N <- c(100, 200, 500, 1000)
   
-  #(test <- lapply(1:2, simulation.chicago.2, delta = delta, h = h, r = r, n = 200, varphi = varphi, kernel = TRUE, kernel2d = TRUE))
+  set.seed(1)
+  #(test <- lapply(1:2, simulation.chicago, delta = delta, h = h, r = r, n = 200, varphi = varphi, kernel = TRUE, kernel2d = TRUE))
   
   intens <- vector("list", length(N))
   for (i in 1:length(N)) {
@@ -136,7 +135,7 @@ if (simulation.intensity.kernel){
     clusterEvalQ(cl, library(tidyr))
     
     message(N[i])
-    intens[[i]] <- parLapply(cl, 1:R, simulation.chicago.2, delta = delta, h = h, r = r, n = N[i], varphi = varphi, kernel = TRUE, kernel2d = TRUE)
+    intens[[i]] <- parLapply(cl, 1:R, simulation.chicago, delta = delta, h = h, r = r, n = N[i], varphi = varphi, kernel = TRUE, kernel2d = TRUE)
     stopCluster(cl) 
     
     saveRDS(intens, file = "simulation_intensity_n.rds")
@@ -186,36 +185,43 @@ if (simulation.intensity.kernel){
   mise$mise.test <- mise$var + mise$bias
   mise[, 3:6] <- mise[, 3:6]*10000
   
-  df <- bind_rows(df.pspline, df.kernel, df.kernel2d) %>% 
+  df.1 <- bind_rows(df.pspline, df.kernel, df.kernel2d) %>% 
     mutate(kind = factor(kind, levels = c("pspline", "kernel", "kernel2d")))
   
-  g <- ggplot(df %>% mutate(ISE = 10000*ISE), aes(x = n, y = ISE)) + 
-    geom_boxplot(aes(color = kind)) + 
+  g.boxplot.kernel <- ggplot(df.1 %>% mutate(ISE = 10000*ISE), aes(x = n, y = ISE)) + 
+    geom_boxplot(aes(color = kind, linetype = kind)) + 
     theme_bw() + 
-    theme(legend.justification = c(0.01, 0.99), legend.position = c(0.01, 0.995)) + 
-    labs(color = "Estimate") + 
-    scale_y_continuous(limits = c(0, 0.5)) + 
-    scale_color_hue(labels = c("penalized spline based estimate", "kernel estimate based on shortest path distance", "kernel estimate based on Euclidean distance"))
+    labs(color = "", linetype = "", y = "ISE*10,000") + 
+    scale_y_continuous(limits = c(0, 0.3)) + 
+    scale_color_hue(labels = c("penalized spline based estimate", "kernel estimate based on shortest path distance", 
+                               "kernel estimate based on Euclidean distance")) + 
+    scale_linetype(labels = c("penalized spline based estimate", "kernel estimate based on shortest path distance", 
+                              "kernel estimate based on Euclidean distance")) + 
+    theme(axis.text = element_text(size = 12),
+          axis.title = element_text(size = 12))
   
   pdf(file = "Plots/simulation_n.pdf", height = 6, width = 6)
-  print(g)
+  print(g.boxplot.kernel)
   dev.off()
   
-  df.mise <- tibble(n = factor(rep(mise$n, 2), labels = c("n = 100", "n = 200", "n = 500", "n = 1000")), kind = factor(rep(mise$kind, 2)),
-                    error = c(mise$var, mise$bias),
-                    kind2 = factor(c(rep("IVar", nrow(mise)), rep("ISBias", nrow(mise))), levels = c("IVar", "ISBias"))) %>% 
+  df.1.mise <- tibble(n = factor(rep(mise$n, 2), labels = c("n = 100", "n = 200", "n = 500", "n = 1000")), kind = factor(rep(mise$kind, 2)),
+                      error = c(mise$var, mise$bias),
+                      kind2 = factor(c(rep("IVar", nrow(mise)), rep("ISBias", nrow(mise))), levels = c("IVar", "ISBias"))) %>% 
     mutate(kind = factor(kind, levels = c("pspline", "kernel", "kernel2d"))) 
   
-  g.kernel <- ggplot(df.mise, aes(x = kind, y = error)) + 
+  g.mise.kernel <- ggplot(df.1.mise, aes(x = kind, y = error)) + 
     geom_col(aes(fill = kind2, linetype = kind), position = "stack", color = "black", size = 1, width = 0.8) + 
-    scale_y_continuous(breaks = seq(0, 0.3, 0.05), limits = c(0, 0.3)) +
+    scale_y_continuous(breaks = seq(0, 0.1, 0.02), limits = c(0, 0.1)) +
     theme_bw() + 
     facet_wrap( ~ n, nrow = 1) + 
     theme(panel.spacing = unit(0, "lines"), axis.text.x = element_blank(), 
-          legend.position = "bottom", legend.direction = "vertical") + 
-    guides(linetype = guide_legend(keyheight = 0.8, keywidth = 1.6, override.aes = list(fill = NA, col = "black")),
-           fill = guide_legend(keyheight = 0.8, keywidth = 1.6)) +
-    labs(y = "MISE", x = "", fill = "", linetype = "Method") + 
+          legend.position = "bottom", legend.direction = "vertical",
+          axis.text = element_text(size = 12),
+          axis.title = element_text(size = 12),
+          strip.text = element_text(size = 12)) + 
+    guides(linetype = guide_legend(keyheight = 1, keywidth = 2, override.aes = list(fill = NA, col = "black")),
+           fill = guide_legend(keyheight = 1, keywidth = 2)) +
+    labs(y = "MISE*10,000", x = "", fill = "", linetype = "") + 
     scale_linetype(labels = c("penalized spline based estimate", "kernel estimate based on shortest path distance", "kernel estimate based on Euclidean distance"))
 }
 
@@ -239,7 +245,7 @@ if (simulation.intensity.edges){
   intens.edges <- vector("list", length(N))
   for (i in 1:length(N)) {
     
-    no_cores <- min(detectCores() - 2, 10)
+    no_cores <- min(detectCores() - 2, 5)
     set.seed(1)
     
     cl <- makeCluster(no_cores)
@@ -254,7 +260,7 @@ if (simulation.intensity.edges){
     clusterEvalQ(cl, library(tidyr))
     
     message(N[i])
-    intens.edges[[i]] <- parLapply(cl, 1:R, simulation.chicago.2, delta = delta, h = h, r = r, n = N[i], 
+    intens.edges[[i]] <- parLapply(cl, 1:R, simulation.chicago, delta = delta, h = h, r = r, n = N[i], 
                                    varphi = varphi, kernel = TRUE, kernel2d = TRUE)
     stopCluster(cl) 
     
@@ -305,42 +311,56 @@ if (simulation.intensity.edges){
   mise$mise.test <- mise$var + mise$bias
   mise[, 3:6] <- mise[, 3:6]*10000
   
-  df <- bind_rows(df.pspline, df.kernel, df.kernel2d) %>% 
+  df.2 <- bind_rows(df.pspline, df.kernel, df.kernel2d) %>% 
     mutate(kind = factor(kind, levels = c("pspline", "kernel", "kernel2d")))
   
-  g <- ggplot(df %>% mutate(ISE = 10000*ISE), aes(x = n, y = ISE)) + 
-    geom_boxplot(aes(color = kind)) + 
+  g.boxplot.edges <- ggplot(df.2 %>% mutate(ISE = 10000*ISE), aes(x = n, y = ISE)) + 
+    geom_boxplot(aes(color = kind, linetype = kind)) + 
     theme_bw() + 
-    theme(legend.justification = c(0.01, 0.99), legend.position = c(0.01, 0.995)) + 
-    labs(color = "Estimate") + 
-    scale_y_continuous(limits = c(0, 5)) + 
-    scale_color_hue(labels = c("penalized spline based estimate", "kernel estimate based on shortest path distance", "kernel estimate based on Euclidean distance"))
+    labs(color = "", linetype = "", y = "ISE*10,000") + 
+    scale_y_continuous(limits = c(0, 3)) + 
+    scale_color_hue(labels = c("penalized spline based estimate", "kernel estimate based on shortest path distance", 
+                               "kernel estimate based on Euclidean distance")) + 
+    scale_linetype(labels = c("penalized spline based estimate", "kernel estimate based on shortest path distance", 
+                              "kernel estimate based on Euclidean distance"))  + 
+    theme(axis.text = element_text(size = 12),
+          axis.title = element_text(size = 12))
   
-  pdf(file = "Plots/simulation_n.pdf", height = 6, width = 6)
-  print(g)
+  legend <- gtable_filter(ggplot_gtable(ggplot_build(g.boxplot.kernel + theme(legend.position = "bottom", legend.direction = "horizontal", 
+                                                                              legend.text = element_text(size = 12),
+                                                                              legend.key.size = unit(1, "cm")))), "guide-box") 
+  
+  
+  pdf(file = "Plots/simulation_n.pdf", height = 6, width = 12)
+  grid.arrange(arrangeGrob(g.boxplot.kernel + theme(legend.position="none"), g.boxplot.edges + theme(legend.position="none"), nrow = 1), 
+               legend, nrow = 2, heights = c(9, 2))
   dev.off()
   
-  df.mise <- tibble(n = factor(rep(mise$n, 2), labels = c("n = 100", "n = 200", "n = 500", "n = 1000")), kind = factor(rep(mise$kind, 2)),
-                    error = c(mise$var, mise$bias),
-                    kind2 = factor(c(rep("IVar", nrow(mise)), rep("ISBias", nrow(mise))), levels = c("IVar", "ISBias"))) %>% 
+  df.2.mise <- tibble(n = factor(rep(mise$n, 2), labels = c("n = 100", "n = 200", "n = 500", "n = 1000")), kind = factor(rep(mise$kind, 2)),
+                      error = c(mise$var, mise$bias),
+                      kind2 = factor(c(rep("IVar", nrow(mise)), rep("ISBias", nrow(mise))), levels = c("IVar", "ISBias"))) %>% 
     mutate(kind = factor(kind, levels = c("pspline", "kernel", "kernel2d"))) 
   
-  g.edges <- ggplot(df.mise, aes(x = kind, y = error)) + 
+  g.mise.edges <- ggplot(df.2.mise, aes(x = kind, y = error)) + 
     geom_col(aes(fill = kind2, linetype = kind), position = "stack", color = "black", size = 1, width = 0.8) + 
     scale_y_continuous(breaks = seq(0, 3, 0.5), limits = c(0, 3)) +
     theme_bw() + 
     facet_wrap( ~ n, nrow = 1) + 
     theme(panel.spacing = unit(0, "lines"), axis.text.x = element_blank(),
-          legend.position = "bottom", legend.direction = "vertical") + 
-    guides(linetype = guide_legend(keyheight = 0.8, keywidth = 1.6, override.aes = list(fill = NA, col = "black")),
-           fill = guide_legend(keyheight = 0.8, keywidth = 1.6)) +
-    labs(y = "MISE", x = "", fill = "", linetype = "Method") + 
+          legend.position = "bottom", legend.direction = "vertical",
+          axis.text = element_text(size = 12),
+          axis.title = element_text(size = 12),
+          strip.text = element_text(size = 12)) + 
+    guides(linetype = guide_legend(keyheight = 1, keywidth = 2, override.aes = list(fill = NA, col = "black")),
+           fill = guide_legend(keyheight = 1, keywidth = 2)) +
+    labs(y = "MISE*10,000", x = "", fill = "", linetype = "Method") + 
     scale_linetype(labels = c("penalized spline based estimate", "kernel estimate based on shortest path distance", "kernel estimate based on Euclidean distance"))
   
-  legend <- gtable_filter(ggplot_gtable(ggplot_build(g.kernel + theme(legend.position = "bottom"))), "guide-box") 
+  legend <- gtable_filter(ggplot_gtable(ggplot_build(g.mise.kernel + theme(legend.position = "bottom",
+                                                                           legend.text = element_text(size = 12)))), "guide-box") 
   
   pdf(file = "Plots/mise.pdf", height = 6, width = 12)
-  grid.arrange(arrangeGrob(g.kernel + theme(legend.position="none"), g.edges + theme(legend.position="none"), nrow = 1), 
+  grid.arrange(arrangeGrob(g.mise.kernel + theme(legend.position="none"), g.mise.edges + theme(legend.position="none"), nrow = 1), 
                legend, nrow = 2, heights = c(9, 2))
   dev.off() 
 }
@@ -351,7 +371,7 @@ if (simulation.intensity.edges){
 
 if (simulation.intensity.delta.h) {
   R <- 100
-  delta <- c(5, 10, 20, 50)
+  delta <- c(5, 10, 20)
   r <- 2
   varphi <- intens.kernel
   n <- 200
@@ -389,12 +409,12 @@ if (simulation.intensity.delta.h) {
   d <- delta
   for (i in 1:length(delta)) {
     g[[i]] <- ggplot(df %>% mutate(ISE = ISE*10000) %>% filter(delta == d[i]), aes(x = h, y = ISE)) + 
-      geom_boxplot(aes(color = h)) + 
+      geom_boxplot(aes(color = h), show.legend = FALSE) + 
       theme_bw() + 
       theme(legend.direction = "horizontal",
-            legend.justification = c(0.01, 0.99), legend.position = c(0.01, 0.995)) +
-      scale_y_continuous(limits = c(0, 0.5))
-    labs(color = "Global bin width h")
+            plot.title = element_text(hjust = 0.5)) +
+      scale_y_continuous(limits = c(0, 0.2)) +
+      labs(x = "Global bin width h", y = "ISE*10,000", title = bquote(delta == .(d[i])))
     pdf(file = paste0("Plots/simulation_delta_", d[i], ".pdf"), height = 4, width = 4)
     print(g[[i]])
     dev.off()
@@ -453,12 +473,15 @@ if (simulation.internal){
   saveRDS(df, file = "df_simulation_internal.rds")
   df <- df[-which(df$beta < 0), ]
   g <- ggplot(df %>% filter(n %in% c(100, 200, 500, 1000)), aes(x = n, y = beta)) + 
-    geom_boxplot(aes(color = kind)) + 
+    geom_hline(yintercept = 1, linetype = "dashed") + 
+    geom_hline(yintercept = 2) +
+    geom_boxplot(aes(color = kind, linetype = kind)) + 
     theme_bw() + 
     theme(legend.justification = c(0.99, 0.99), legend.position = c(0.99, 0.995),
           legend.direction = "horizontal") + 
-    labs(color = "Effect", y = expression(paste(hat(beta)))) + 
+    labs(color = "Effect", linetype = "Effect", y = expression(paste(hat(beta)))) + 
     scale_color_hue(labels = c("Relative position on the edge", "x-coordinate")) + 
+    scale_linetype(labels = c("Relative position on the edge", "x-coordinate")) +
     scale_y_continuous(limits = c(0, 3), breaks = seq(0, 3, 0.5))
   
   pdf(file = "Plots/simulation_internal.pdf", height = 4, width = 6)
@@ -490,6 +513,7 @@ if (simulation.external){
   for (i in 1:length(beta)) {
     
     no_cores <- min(detectCores() - 2, 20)
+    #detectCores() - 2
     set.seed(1)
     
     cl <- makeCluster(no_cores)
@@ -514,14 +538,23 @@ if (simulation.external){
   
   df <- bind_rows(df.t, df.type) %>% mutate(kind = factor(kind, levels = c("t", "type")))
   saveRDS(df, file = "df_simulation_external.rds")
-  g <- ggplot(df, aes(x = i, y = beta)) + 
-    geom_boxplot(aes(color = kind)) + 
+  g <- ggplot(df, aes(x = i, y = beta)) +
+    geom_segment(aes(x = 0.5, xend = 1, y = 1, yend = 1)) + 
+    geom_segment(aes(x = 1, xend = 1.5, y = -1, yend = -1), linetype = "dashed") + 
+    geom_segment(aes(x = 1.5, xend = 2, y = -1, yend = -1)) + 
+    geom_segment(aes(x = 2, xend = 2.5, y = 1, yend = 1), linetype = "dashed") + 
+    geom_segment(aes(x = 2.5, xend = 3, y = 0, yend = 0)) + 
+    geom_segment(aes(x = 3, xend = 3.5, y = -1, yend = -1), linetype = "dashed") + 
+    geom_segment(aes(x = 3.5, xend = 4, y = 1, yend = 1)) + 
+    geom_segment(aes(x = 4, xend = 4.5, y = 1, yend = 1), linetype = "dashed") + 
+    geom_boxplot(aes(color = kind, linetype = kind)) + 
     theme_bw() + 
     theme(legend.direction = "horizontal") + 
     theme(legend.justification = c(0.99, 0.99), legend.position = c(0.99, 0.995)) + 
-    labs(color = "Effect", y = expression(paste(hat(beta))),
+    labs(color = "Effect", linetype = "Effect", y = expression(paste(hat(beta))),
          x = expression(beta)) + 
     scale_color_hue(labels = c("Time", "Type")) + 
+    scale_linetype(labels = c("Time", "Type")) +
     scale_x_discrete(labels = c(expression(beta^(1)), expression(beta^(2)), expression(beta^(3)), expression(beta^(4)))) + 
     scale_y_continuous(limits = c(-2, 2), breaks = seq(-2, 2, 0.5))
   
