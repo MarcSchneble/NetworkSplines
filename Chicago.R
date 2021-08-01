@@ -17,13 +17,22 @@ library(gtable)
 # load functions
 source("Functions.R")
 
-simulation.intensity.kernel <- TRUE
+# choose which analyses to run when sourcing the script
+
+# Figures 3 (left), 5, 6
+chicago.analyses <- TRUE
+# simulation study (Figure 11+12, left)
+simulation.intensity.kernel <- FALSE
+# simulation study (Figure 11+12, right)
 simulation.intensity.edges <- FALSE
+# simulation study (Figure 13)
 simulation.intensity.delta.h <- FALSE
+# simulation study (Figure 14, left)
 simulation.internal <- FALSE
+# simulation study (Figure 14, right)
 simulation.external <- FALSE
 
-if (simulation.intensity.kernel | simulation.external | simulation.intensity.delta.h){
+if (chicago.analyses){
   # augmented Chicago network
   delta <- 10
   h <- 2
@@ -106,6 +115,15 @@ if (simulation.intensity.kernel | simulation.external | simulation.intensity.del
 
 
 if (simulation.intensity.kernel){
+  
+  delta <- 10
+  h <- 2
+  r <- 2
+  L <- augment.linnet(as.linnet(chicago), delta, h, r)
+  X <- as.ppp(chicago)
+  L.lpp <- lpp(X, L)
+  sigma <- bw.lppl(L.lpp, distance = "path")
+  intens.kernel <- density.lpp(L.lpp, sigma = as.numeric(sigma), dimyx = c(256, 256))
   
   R <- 100
   delta <- 10
@@ -370,6 +388,15 @@ if (simulation.intensity.edges){
 
 
 if (simulation.intensity.delta.h) {
+  delta <- 10
+  h <- 2
+  r <- 2
+  L <- augment.linnet(as.linnet(chicago), delta, h, r)
+  X <- as.ppp(chicago)
+  L.lpp <- lpp(X, L)
+  sigma <- bw.lppl(L.lpp, distance = "path")
+  intens.kernel <- density.lpp(L.lpp, sigma = as.numeric(sigma), dimyx = c(256, 256))
+  
   R <- 100
   delta <- c(5, 10, 20)
   r <- 2
@@ -493,6 +520,14 @@ if (simulation.internal){
 # simulation with external covariates ----
 
 if (simulation.external){
+  delta <- 10
+  h <- 2
+  r <- 2
+  L <- augment.linnet(as.linnet(chicago), delta, h, r)
+  X <- as.ppp(chicago)
+  L.lpp <- lpp(X, L)
+  sigma <- bw.lppl(L.lpp, distance = "path")
+  intens.kernel <- density.lpp(L.lpp, sigma = as.numeric(sigma), dimyx = c(256, 256))
   
   R <- 100
   delta <- 10

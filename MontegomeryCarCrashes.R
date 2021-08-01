@@ -17,6 +17,8 @@ library(mgcv)
 
 # load functions
 source(file = "Functions.R")
+
+# to produce Figure 4, a google API key is needed
 #register_google("")
 
 # get data on car crashes
@@ -101,7 +103,7 @@ plot(intens, log = TRUE)
 plot(intens.covariates, log = TRUE)
 plot(intens, style = "width")
 
-# plot intensity without and with covariates
+# plot intensity without and with covariates (Figure 9)
 pdf(file = "Plots/Montgomery_intensity.pdf", width = 8, height = 5)
 par(mar=c(0, 0, 0, 1), cex = 1.6)
 plot(intens/4, log = TRUE, main = "", ribwid = 0.06, ribsep = 0, box = TRUE)
@@ -112,7 +114,7 @@ par(mar=c(0, 0, 0, 1), cex = 1.6)
 plot(intens.covariates, log = TRUE, main = "", ribwid = 0.06, ribsep = 0, box = TRUE)
 dev.off()
 
-# plot smooth effects
+# plot smooth effects (Figure 8)
 g <- ggplot(intens.covariates$effects$smooth$hour) + 
   geom_ribbon(aes(x = x, ymin = exp(lwr), ymax = exp(upr)), fill = "grey50") + 
   geom_line(aes(x = x, y = exp(y)), color = "red") + 
@@ -124,13 +126,6 @@ pdf(file = "Plots/Montgomery_smooth_t.pdf", width = 6, height = 4)
 print(g)
 dev.off()
 
-sigma <- bw.lppl(L.lpp)
-intens.kernel <- density.lpp(L.lpp, sigma = as.numeric(sigma), dimyx = c(256, 256))
-plot(intens.kernel, log = TRUE)
-
-sigma <- bw.scott(L.lpp)
-intens.kernel2d <- density.lpp(L.lpp, sigma = sigma, distance = "euclidean", dimyx = c(256, 256))
-plot(intens.kernel2d, log = TRUE)
 
 # plot network on map ----
 
@@ -139,18 +134,19 @@ bottom <- 38.948
 right <- -76.96
 top <- 39.122
 
-g <- ggmap(get_map(location = c(left = left, bottom = bottom, right = right, top = top), maptype = "roadmap", scale = 2)) +
-  geom_segment(data = E, aes(x = from.lon, y = from.lat, xend = to.lon, yend = to.lat), size = 1.2) +
-  geom_point(data = data, aes(x = lon, y = lat, color = on)) + 
-  labs(x = "Longitude", y = "Latitude")
+if (has_google_key()) {
+  g <- ggmap(get_map(location = c(left = left, bottom = bottom, right = right, top = top), maptype = "roadmap", scale = 2)) +
+    geom_segment(data = E %>% slice(L$ind.edges), aes(x = from.lon, y = from.lat, xend = to.lon, yend = to.lat), size = 1.5) +
+    geom_point(data = data %>% filter(on == 1), aes(x = lon, y = lat), col = "red", alpha = 0.2) + 
+    labs(x = "Longitude", y = "Latitude") + 
+    theme(axis.text = element_text(size = 15),
+          axis.title = element_text(size = 15))
+  
+  # Figure 4
+  pdf(file = "Plots/MontgomeryNetwork.pdf", height = 8, width = 10)
+  print(g)
+  dev.off()
+} else {
+  stop("Set google API key using 'register_google()' to produce the plot.")
+}
 
-g <- ggmap(get_map(location = c(left = left, bottom = bottom, right = right, top = top), maptype = "roadmap", scale = 2)) +
-  geom_segment(data = E %>% slice(L$ind.edges), aes(x = from.lon, y = from.lat, xend = to.lon, yend = to.lat), size = 1.5) +
-  geom_point(data = data %>% filter(on == 1), aes(x = lon, y = lat), col = "red", alpha = 0.2) + 
-  labs(x = "Longitude", y = "Latitude") + 
-  theme(axis.text = element_text(size = 15),
-        axis.title = element_text(size = 15))
-
-pdf(file = "Plots/MontgomeryNetwork.pdf", height = 8, width = 10)
-print(g)
-dev.off()
