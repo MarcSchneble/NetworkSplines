@@ -77,6 +77,20 @@ L.lpp <- as.lpp(seg = seg, tp = tp, L = L, marks = marks)
 L <- as.linnet(L.lpp)
 L.lpp$data$sos <- data.parking$SideOfStreetCode[match(L.lpp$data$marks, data.parking$StreetMarker)]
 
+# network for dissertation defense
+library(geonet)
+G <- as_gnpp(L.lpp)
+G$data$x <- G$data$x*s + min.lon
+G$data$y <- G$data$y*s + min.lat
+G$network$vertices$x <- G$network$vertices$x*s + min.lon
+G$network$vertices$y <- G$network$vertices$y*s + min.lat
+G$network$lins$a1_x <- G$network$lins$a1_x*s + min.lon
+G$network$lins$a2_x <- G$network$lins$a2_x*s + min.lon
+G$network$lins$a1_y <- G$network$lins$a1_y*s + min.lat
+G$network$lins$a2_y <- G$network$lins$a2_y*s + min.lat
+saveRDS(G, "Data/Melbourne_network.rds")
+
+
 # intensity estimate of parking lots
 intens.lots <- intensity.pspline.lpp(L.lpp, dimyx = c(150, 250))
 intens.lots.covariates <- intensity.pspline.lpp(L.lpp, lins = c("dist2Vdiscrete"),

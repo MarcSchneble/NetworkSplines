@@ -55,5 +55,5 @@ plot.igraph(G, vertex.size = 0, vertex.shape = "none",
             edge.label.x = c(-0.82, -0.41, 0.45,  0.10, -0.09,  0.94, -0.88, -0.21, -0.39),
             edge.label.y = c( 0.68,  0.96, 0.87,  0.09, -0.12, -0.25, -0.31, -0.82, -0.43),
             layout = v, margin = c(0.1, 0.1, 0, 0.25))
-title(main = "Geometric Network Representation", cex.main = 1.75)
+#title(main = "Geometric Network Representation", cex.main = 1.75)
 dev.off()
