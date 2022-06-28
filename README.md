@@ -1,7 +1,7 @@
 # NetworkSplines
 Code and data for reproducing the article
 
-Marc Schneble and Göran Kauermann (2021): "Intensity Estimation on Geometric Networks with Penalized Splines"
+Marc Schneble and Göran Kauermann (2022): "Intensity Estimation on Geometric Networks with Penalized Splines"
 
 This folder contains the following sub-folders and R-files:
 
